@@ -18,6 +18,27 @@ Runs all 3 steps in sequence. Start here.
 
 ---
 
+### `/demand-validation-os` — SEO Demand And Attribution Entry Point
+
+Scores and diagnoses two SEO research jobs:
+
+- `榜单归因`
+- `新词 / 新需求验证`
+
+Combines gefei, chuhai, Google Trends, Similarweb, and Semrush into one evidence-first output.
+
+Output:
+
+- scorecard + hard gates
+- attribution or demand decision
+- first batch of pages when applicable
+
+```
+/demand-validation-os
+```
+
+---
+
 ### Step 1: `propagation-evidence-collector`
 
 Reconstruct HOW something spread using multi-source evidence.
