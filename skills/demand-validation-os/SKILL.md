@@ -136,6 +136,7 @@ Read [references/capture-schema.md](references/capture-schema.md) before using t
 `scripts/browser_capture.py` provides:
 
 - automated 3ue login with DOM injection instead of brittle typing
+- dashboard home recovery when 3ue falls back to the login screen mid-session
 - dashboard card opening for Similarweb and Semrush
 - network capture parsing
 - shared session helpers for `browse`
@@ -160,6 +161,7 @@ Current behavior:
 - opens an authenticated Semrush route
 - captures network payloads
 - extracts `dpa/rpc` responses into structured JSON
+- retries the overview route once if the first pass returns no RPC payloads
 - uses a dedicated browser session so Similarweb and Semrush captures do not pollute each other
 - closes the automation browser session automatically unless `--keep-session` is passed
 
@@ -189,9 +191,9 @@ Current behavior:
 
 - logs into `dash.3ue.com`
 - opens Similarweb only through the 3ue card
-- waits for the authenticated Similarweb shell to become DOM-ready
+- waits for the authenticated Similarweb shell to become DOM-ready, with fallback markers when the shell half-loads
 - captures account-state and target-domain suggestion evidence
-- extracts identity, startup settings, autocomplete suggestions, quick-search report candidates, and `网站表现` / website-performance report blocks
+- extracts identity, startup settings, autocomplete suggestions, quick-search report candidates, activation-home priority alerts, and `网站表现` / website-performance report blocks
 - uses a dedicated browser session so Similarweb and Semrush captures do not pollute each other
 - closes the automation browser session automatically unless `--keep-session` is passed
 
@@ -200,6 +202,26 @@ Current limitation:
 - `网站表现` is now the stable Similarweb baseline capture
 - landing-pages and some deeper report families are still more session-sensitive than Semrush
 - if a deeper report cannot be reached, the script still emits useful `account_state` and route evidence instead of pretending a report was reached
+
+### Serial Bundle Capture
+
+Use when you want both tools in one run and do not want parallel browser sessions interfering with each other:
+
+```bash
+export THREEUE_USERNAME='...'
+export THREEUE_PASSWORD='...'
+python3 scripts/capture_bundle.py \
+  --query crazygames.com \
+  --output /tmp/crazygames-bundle.json
+```
+
+Current behavior:
+
+- runs `semrush` then `similarweb` serially by default
+- records per-attempt runtime, quality, and failure metadata
+- retries `similarweb` once by default if the first attempt does not reach the core report layer
+- returns a combined JSON bundle under `results.semrush.data` and `results.similarweb.data`
+- is the preferred entry point when you need both captures together
 
 ## Scorecards
 

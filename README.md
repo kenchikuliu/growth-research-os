@@ -47,13 +47,19 @@ python3 skills/demand-validation-os/scripts/capture_semrush.py \
 python3 skills/demand-validation-os/scripts/capture_similarweb.py \
   --query crazygames.com \
   --output /tmp/similarweb-crazygames.json
+
+python3 skills/demand-validation-os/scripts/capture_bundle.py \
+  --query crazygames.com \
+  --output /tmp/crazygames-bundle.json
 ```
 
 Current state:
 
-- `Semrush` capture is the stronger structured source and emits overview, competitors, keywords, pages, trend, market, AI, and backlink sections.
-- `Similarweb` capture now reliably opens through the 3ue dashboard card, waits for the authenticated shell, and extracts `网站表现` / website-performance report blocks into structured JSON.
-- `Similarweb` still has partial gaps for landing-pages style report automation; website-performance is the stable captured baseline.
+- `Semrush` capture is still the stronger structured source and emits overview, competitors, keywords, pages, trend, market, AI, and backlink sections.
+- `Semrush` now retries the overview route once if the first pass returns no RPC payloads.
+- `Similarweb` now survives more 3ue shell half-load cases and can still emit activation-home priority-alert signals even when deeper routes are fragile.
+- `Similarweb` still has partial gaps for landing-pages style report automation; `网站表现` / website-performance is the stable captured baseline.
+- `capture_bundle.py` is the preferred way to run both tools together because it executes them serially and avoids cross-session interference from parallel browser-backed runs.
 
 ```
 /demand-validation-os

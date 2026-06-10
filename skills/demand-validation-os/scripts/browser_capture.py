@@ -15,6 +15,7 @@ from typing import Any
 
 
 DEFAULT_DASHBOARD_URL = "https://dash.3ue.com/zh-Hans/#/login"
+DEFAULT_DASHBOARD_HOME_URL = "https://dash.3ue.com/zh-Hans/#/page/m/home"
 
 
 class BrowseError(RuntimeError):
@@ -81,6 +82,8 @@ class BrowseClient:
             "Navigation was superseded by a new request" in text
             or "No Page found for awaitActivePage: no page available" in text
             or "browse command timed out" in text
+            or "waitForMainLoadState(load) timed out" in text
+            or "waitForMainLoadState(domcontentloaded) timed out" in text
         )
 
     def open(self, url: str, timeout: int = 60) -> Any:
@@ -90,6 +93,18 @@ class BrowseClient:
                 return self.run("open", url, timeout=timeout)
             except BrowseError as exc:
                 last_error = exc
+                if self._is_retryable_open_error(exc):
+                    current = ""
+                    try:
+                        current = self.current_url(timeout=10)
+                    except BrowseError:
+                        current = ""
+                    if current and (current == url or current.startswith(url) or url in current):
+                        return {
+                            "url": current,
+                            "recovered": True,
+                            "warning": str(exc),
+                        }
                 if not self._is_retryable_open_error(exc) or attempt == 2:
                     raise
                 time.sleep(2 + attempt)
@@ -119,11 +134,23 @@ class BrowseClient:
             return str(data.get("url", ""))
         return str(data or "")
 
+    def try_current_url(self, timeout: int = 15) -> str:
+        try:
+            return self.current_url(timeout=timeout)
+        except BrowseError:
+            return ""
+
     def current_title(self, timeout: int = 15) -> str:
         data = self.get("title", timeout=timeout)
         if isinstance(data, dict):
             return str(data.get("title", ""))
         return str(data or "")
+
+    def try_current_title(self, timeout: int = 15) -> str:
+        try:
+            return self.current_title(timeout=timeout)
+        except BrowseError:
+            return ""
 
     def press(self, key: str, timeout: int = 15) -> Any:
         return self.run("press", key, timeout=timeout)
@@ -140,6 +167,30 @@ class BrowseClient:
 
     def snapshot(self, timeout: int = 20) -> Any:
         return self.run("snapshot", timeout=timeout)
+
+    def try_snapshot(self, timeout: int = 20) -> Any:
+        try:
+            return self.snapshot(timeout=timeout)
+        except BrowseError:
+            return None
+
+    def get_text(self, selector: str = "body", timeout: int = 30) -> str:
+        data = self.get("text", selector, timeout=timeout)
+        if isinstance(data, dict):
+            return str(data.get("text", ""))
+        return str(data or "")
+
+    def try_get_text(self, selector: str = "body", timeout: int = 30) -> str:
+        try:
+            return self.get_text(selector=selector, timeout=timeout)
+        except BrowseError:
+            return ""
+
+    def try_eval(self, expression: str, timeout: int = 30) -> Any:
+        try:
+            return self.eval(expression, timeout=timeout)
+        except BrowseError:
+            return None
 
     def fetch_json(self, url: str, timeout: int = 30) -> Any:
         result = self.eval(
@@ -230,16 +281,73 @@ class ThreeUEExecutor:
     def stop(self) -> None:
         self.browser.stop(ignore_errors=True)
 
-    def login(self) -> dict[str, Any]:
-        self.browser.open(DEFAULT_DASHBOARD_URL, timeout=90)
-        self.browser.wait_timeout(3)
+    def _dashboard_state(self) -> dict[str, Any]:
+        url = self.browser.current_url(timeout=10)
+        title = self.browser.current_title(timeout=10)
+        body_text = self.browser.try_get_text("body", timeout=15)
+        eval_state = self.browser.try_eval(
+            """
+            (() => {
+              const text = (el) => (el?.innerText || el?.textContent || "").trim();
+              const username = document.querySelector("#input-username")
+                || [...document.querySelectorAll("input")]
+                  .find((el) => /user|账户|账号|用户名/i.test([el.id, el.name, el.placeholder].filter(Boolean).join(" ")));
+              const password = document.querySelector("#input-password")
+                || [...document.querySelectorAll("input[type='password'], input")]
+                  .find((el) => el.type === "password" || /pass|密码/i.test([el.id, el.name, el.placeholder].filter(Boolean).join(" ")));
+              const loginButton = [...document.querySelectorAll("button")]
+                .find((el) => /登录/.test(text(el)) || el.getAttribute("status") === "primary");
+              return {
+                has_username: !!username,
+                has_password: !!password,
+                has_login_button: !!loginButton,
+              };
+            })()
+            """,
+            timeout=8,
+        )
+        has_form = bool(
+            isinstance(eval_state, dict)
+            and eval_state.get("has_username")
+            and eval_state.get("has_password")
+        )
+        home_ready = "/page/m/home" in url or "用户中心" in body_text or "套餐中心" in body_text
+        login_ready = has_form or ("用户名" in body_text and "密码" in body_text)
+        return {
+            "url": url,
+            "title": title,
+            "body_excerpt": body_text[:300],
+            "home_ready": home_ready,
+            "login_ready": login_ready,
+            "login_form_ready": has_form,
+            "eval_state": eval_state if isinstance(eval_state, dict) else {},
+        }
+
+    def _wait_for_dashboard_surface(self, timeout: int = 60) -> dict[str, Any]:
+        deadline = time.time() + timeout
+        last_state: dict[str, Any] = {}
+        while time.time() < deadline:
+            state = self._dashboard_state()
+            last_state = state
+            if state["home_ready"] or state["login_ready"]:
+                return state
+            time.sleep(1)
+        raise BrowseError(f"Timed out waiting for dashboard login or home surface: {last_state}")
+
+    def _submit_login_form(self) -> dict[str, Any]:
         result = self.browser.eval(
             f"""
             (() => {{
-              const u = document.querySelector("#input-username");
-              const p = document.querySelector("#input-password");
-              const btn = document.querySelector('button[status="primary"], button');
-              if (!u || !p || !btn) return {{ ok: true, reusedSession: true, reason: "login-form-missing" }};
+              const text = (el) => (el?.innerText || el?.textContent || "").trim();
+              const u = document.querySelector("#input-username")
+                || [...document.querySelectorAll("input")]
+                  .find((el) => /user|账户|账号|用户名/i.test([el.id, el.name, el.placeholder].filter(Boolean).join(" ")));
+              const p = document.querySelector("#input-password")
+                || [...document.querySelectorAll("input[type='password'], input")]
+                  .find((el) => el.type === "password" || /pass|密码/i.test([el.id, el.name, el.placeholder].filter(Boolean).join(" ")));
+              const btn = [...document.querySelectorAll('button')]
+                .find((el) => /登录/.test(text(el)) || el.getAttribute("status") === "primary");
+              if (!u || !p || !btn) return {{ ok: false, reason: "login-form-missing" }};
               const set = (el, value) => {{
                 const desc = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), "value")
                   || Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
@@ -255,23 +363,48 @@ class ThreeUEExecutor:
             """,
             timeout=30,
         )
-        self.browser.wait_timeout(4)
-        self.ensure_home()
-        url = self.browser.get("url")
-        title = self.browser.get("title")
-        current_url = url.get("url") if isinstance(url, dict) else url
+        if not isinstance(result, dict) or not result.get("ok"):
+            raise BrowseError(f"Failed to submit 3ue login form: {result}")
+        return result
+
+    def login(self) -> dict[str, Any]:
+        self.browser.open(DEFAULT_DASHBOARD_URL, timeout=90)
+        state = self._wait_for_dashboard_surface(timeout=60)
+        result: dict[str, Any]
+        if state["home_ready"]:
+            result = {"ok": True, "reusedSession": True, "reason": "home-surface-ready"}
+        else:
+            result = self._submit_login_form()
+            self.browser.wait_timeout(4)
+        final_state = self.ensure_home(timeout=90)
         return {
             "login_result": {
                 **(result if isinstance(result, dict) else {"raw": result}),
-                "home_ready": isinstance(current_url, str) and "/page/m/home" in current_url,
+                "home_ready": final_state["home_ready"],
             },
-            "url": current_url,
-            "title": title.get("title") if isinstance(title, dict) else title,
+            "url": final_state["url"],
+            "title": final_state["title"],
         }
 
-    def ensure_home(self) -> None:
-        self.browser.open("https://dash.3ue.com/zh-Hans/#/page/m/home", timeout=90)
-        self.browser.wait_timeout(2)
+    def ensure_home(self, timeout: int = 90) -> dict[str, Any]:
+        deadline = time.time() + timeout
+        last_state: dict[str, Any] = {}
+        login_attempted = False
+        self.browser.open(DEFAULT_DASHBOARD_HOME_URL, timeout=90)
+        while time.time() < deadline:
+            state = self._wait_for_dashboard_surface(timeout=20)
+            last_state = state
+            if state["home_ready"]:
+                return state
+            if state["login_form_ready"] and not login_attempted:
+                self._submit_login_form()
+                login_attempted = True
+                self.browser.wait_timeout(4)
+                self.browser.open(DEFAULT_DASHBOARD_HOME_URL, timeout=90)
+                continue
+            self.browser.open(DEFAULT_DASHBOARD_HOME_URL, timeout=90)
+            time.sleep(2)
+        raise BrowseError(f"Timed out ensuring dashboard home: {last_state}")
 
     def _sync_get_json(self, url: str) -> Any:
         self.ensure_home()
@@ -317,13 +450,32 @@ class ThreeUEExecutor:
         self.ensure_home()
         index = {"similarweb": 0, "semrush": 1}[tool]
         pages_before = self.browser.pages()
-        snapshot = self.browser.snapshot(timeout=30)
-        tree = snapshot.get("tree", "") if isinstance(snapshot, dict) else ""
-        refs = re.findall(r"\[(\d+-\d+)\]\s+button: 打开", tree)
-        if len(refs) <= index:
-            result = {"ok": False, "count": len(refs), "reason": "open-button-ref-missing"}
-        else:
-            result = self.browser.click(f"@{refs[index]}", timeout=30)
+        result: dict[str, Any] | Any = {"ok": False, "reason": "open-button-ref-missing"}
+        refs: list[str] = []
+        for _ in range(3):
+            snapshot = self.browser.try_snapshot(timeout=30)
+            tree = snapshot.get("tree", "") if isinstance(snapshot, dict) else ""
+            refs = re.findall(r"\[(\d+-\d+)\]\s+(?:button|link): 打开", tree)
+            if len(refs) > index:
+                result = self.browser.click(f"@{refs[index]}", timeout=30)
+                break
+            click_result = self.browser.try_eval(
+                f"""
+                (() => {{
+                  const buttons = [...document.querySelectorAll("button, a")]
+                    .filter((el) => /打开/.test((el.innerText || el.textContent || "").trim()));
+                  const target = buttons[{index}] || null;
+                  if (!target) return {{ ok: false, reason: "open-button-dom-missing", count: buttons.length }};
+                  target.click();
+                  return {{ ok: true, clickedVia: "dom-text-button", count: buttons.length }};
+                }})()
+                """,
+                timeout=10,
+            )
+            if isinstance(click_result, dict) and click_result.get("ok"):
+                result = click_result
+                break
+            self.browser.wait_timeout(2)
         try:
             self.browser.wait_timeout(5)
         except BrowseError:

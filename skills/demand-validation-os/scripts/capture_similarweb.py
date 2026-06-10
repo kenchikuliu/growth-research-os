@@ -16,6 +16,14 @@ from browser_capture import BrowseError, ThreeUEExecutor, iso_utc_now, load_netw
 
 
 WEBSITE_PERFORMANCE_ROUTE_FRAGMENT = "/websiteanalysis/overview/website-performance/"
+ACTIVATION_HOME_FRAGMENT = "/#/activation/home"
+DIGITALSUITE_HOME_FRAGMENT = "/#/digitalsuite/home"
+SEARCH_BOX_TEXT = "搜索任何网站、关键词或报告"
+PRIORITY_ALERT_HEADER_RE = re.compile(
+    r"^(?P<domain>[^\s]+)有\s+(?P<count>\d+)\s+个新 Organic (?P<metric>landing pages|keywords)\s*(?P<summary>.*)$",
+    re.S,
+)
+PRIORITY_ALERT_INLINE_RE = re.compile(r"[^\n]*有\s+\d+\s+个新 Organic (?:landing pages|keywords)[^\n]*")
 
 
 def find_first(entries: list[dict[str, Any]], needle: str) -> Any:
@@ -64,11 +72,34 @@ def build_website_performance_route(query: str) -> str:
     )
 
 
+def extract_shell_markers(snapshot: Any, body_text: str, eval_state: Any) -> dict[str, Any]:
+    tree = snapshot.get("tree", "") if isinstance(snapshot, dict) else ""
+    quick_marker = SEARCH_BOX_TEXT in tree or SEARCH_BOX_TEXT in body_text or "快速搜索" in tree or "快速搜索" in body_text
+    activation_marker = "优先提醒" in tree or "最近活动" in tree or "优先提醒" in body_text or "最近活动" in body_text
+    eval_dict = eval_state if isinstance(eval_state, dict) else {}
+    return {
+        "tree_has_search_box": SEARCH_BOX_TEXT in tree,
+        "body_has_search_box": SEARCH_BOX_TEXT in body_text,
+        "tree_has_quick_search": "快速搜索" in tree,
+        "body_has_activation_alerts": "优先提醒" in body_text,
+        "quick_marker": quick_marker,
+        "activation_marker": activation_marker,
+        "page_frame": bool(eval_dict.get("page_frame")),
+        "modal_input": bool(eval_dict.get("modal_input")),
+        "quick": bool(eval_dict.get("quick")),
+        "react_app": bool(eval_dict.get("react_app")),
+    }
+
+
 def wait_for_similarweb_shell_ready(browser: Any, timeout: int = 60) -> dict[str, Any]:
     deadline = time.time() + timeout
     last_state: dict[str, Any] = {}
     while time.time() < deadline:
-        state = browser.eval(
+        url = browser.current_url(timeout=10)
+        title = browser.current_title(timeout=10)
+        snapshot = browser.try_snapshot(timeout=20)
+        body_text = browser.try_get_text("body", timeout=20)
+        eval_state = browser.try_eval(
             """
             (() => ({
               href: window.location.href,
@@ -79,10 +110,26 @@ def wait_for_similarweb_shell_ready(browser: Any, timeout: int = 60) -> dict[str
               page_frame: !!document.querySelector('[data-automation="page-frame-container"]')
             }))()
             """,
-            timeout=20,
+            timeout=8,
         )
-        last_state = state if isinstance(state, dict) else {"raw": state}
-        if isinstance(state, dict) and (state.get("quick") or state.get("modal_input") or state.get("page_frame")):
+        markers = extract_shell_markers(snapshot, body_text, eval_state)
+        state = {
+            "href": url,
+            "title": title,
+            "body_excerpt": body_text[:500],
+            **markers,
+        }
+        if isinstance(eval_state, dict):
+            state.update(eval_state)
+        last_state = state
+        if (
+            markers["quick_marker"]
+            or markers["activation_marker"]
+            or markers["page_frame"]
+            or markers["modal_input"]
+            or ACTIVATION_HOME_FRAGMENT in url
+            or DIGITALSUITE_HOME_FRAGMENT in url
+        ):
             return state
         time.sleep(1.0)
     raise BrowseError(f"Timed out waiting for Similarweb shell DOM to become ready: {last_state}")
@@ -92,7 +139,12 @@ def wait_for_website_performance_ready(browser: Any, timeout: int = 60) -> dict[
     deadline = time.time() + timeout
     last_state: dict[str, Any] = {}
     while time.time() < deadline:
-        state = browser.eval(
+        url = browser.current_url(timeout=10)
+        title = browser.current_title(timeout=10)
+        body_text = browser.try_get_text("body", timeout=20)
+        snapshot = browser.try_snapshot(timeout=20)
+        tree = snapshot.get("tree", "") if isinstance(snapshot, dict) else ""
+        eval_state = browser.try_eval(
             f"""
             (() => {{
               const pageFrame = document.querySelector('[data-automation="page-frame-container"]');
@@ -106,17 +158,96 @@ def wait_for_website_performance_ready(browser: Any, timeout: int = 60) -> dict[
               }};
             }})()
             """,
-            timeout=20,
+            timeout=8,
         )
-        last_state = state if isinstance(state, dict) else {"raw": state}
+        state = {
+            "href": url,
+            "title": title,
+            "body_has_total_visits": "总访问量" in body_text,
+            "tree_has_total_visits": "总访问量" in tree,
+        }
+        if isinstance(eval_state, dict):
+            state.update(eval_state)
+        last_state = state
         if (
-            isinstance(state, dict)
-            and WEBSITE_PERFORMANCE_ROUTE_FRAGMENT in str(state.get("href", ""))
-            and (state.get("total_visits") or state.get("body_has_total_visits"))
+            WEBSITE_PERFORMANCE_ROUTE_FRAGMENT in url
+            and (
+                state.get("total_visits")
+                or state.get("body_has_total_visits")
+                or state.get("tree_has_total_visits")
+            )
         ):
             return state
         time.sleep(1.0)
     raise BrowseError(f"Timed out waiting for Similarweb website-performance DOM: {last_state}")
+
+
+def parse_priority_alert_row(raw_text: str) -> dict[str, Any] | None:
+    compact = " ".join(non_empty_lines(raw_text))
+    if len(re.findall(r"有\s+\d+\s+个新 Organic (?:landing pages|keywords)", compact)) > 1:
+        return None
+    match = PRIORITY_ALERT_HEADER_RE.match(compact)
+    if not match:
+        return None
+    metric = match.group("metric").strip().lower().replace(" ", "_")
+    return {
+        "domain": match.group("domain").strip(),
+        "new_count": int(match.group("count")),
+        "metric": metric,
+        "summary": match.group("summary").strip() or None,
+    }
+
+
+def extract_home_signals(browser: Any) -> dict[str, Any]:
+    state = browser.try_eval(
+        """
+        (() => {
+          const text = (el) => (el?.innerText || el?.textContent || "").trim();
+          const unique = (items) => Array.from(new Set(items.filter(Boolean)));
+          const alertRows = unique(
+            Array.from(document.querySelectorAll("div"))
+              .map((el) => text(el))
+              .filter((value) => /有\\s+\\d+\\s+个新 Organic (landing pages|keywords)/i.test(value) && value.length < 2500)
+          ).slice(0, 20);
+          return {
+            href: window.location.href,
+            title: document.title,
+            alert_rows: alertRows,
+          };
+        })()
+        """,
+        timeout=10,
+    )
+    if not isinstance(state, dict):
+        state = {
+            "href": browser.current_url(timeout=10),
+            "title": browser.current_title(timeout=10),
+            "alert_rows": [],
+        }
+    if not state.get("alert_rows"):
+        body_text = browser.try_get_text("body", timeout=20)
+        matches = PRIORITY_ALERT_INLINE_RE.findall(body_text)
+        state["alert_rows"] = matches[:20]
+    alerts = []
+    seen: set[tuple[str, int, str, str | None]] = set()
+    for row in state.get("alert_rows", []):
+        parsed = parse_priority_alert_row(str(row))
+        if parsed:
+            key = (
+                parsed["domain"],
+                parsed["new_count"],
+                parsed["metric"],
+                parsed.get("summary"),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            alerts.append(parsed)
+    return {
+        "route": state.get("href"),
+        "title": state.get("title"),
+        "priority_alerts": alerts,
+    }
 
 
 def parse_total_visits(text: str | None) -> dict[str, Any] | None:
@@ -603,21 +734,44 @@ def collect(query: str, username: str, password: str, session: str, keep_session
         network_dir = executor.browser.network_clear()
         open_result = executor.open_tool("similarweb")
 
-        shell_state = wait_for_similarweb_shell_ready(executor.browser, timeout=60)
+        shell_notes: list[str] = []
+        try:
+            shell_state = wait_for_similarweb_shell_ready(executor.browser, timeout=75)
+        except BrowseError as exc:
+            shell_state = {
+                "href": executor.browser.current_url(),
+                "title": executor.browser.current_title(),
+                "fallback": True,
+            }
+            shell_notes.append(f"Similarweb shell readiness fell back to url/title-only state: {exc}")
         shell_url = str(shell_state.get("href", executor.browser.current_url()))
         tool_title = str(shell_state.get("title", executor.browser.current_title()))
+        home_signals = extract_home_signals(executor.browser)
 
-        executor.browser.press("Ctrl+K")
-        executor.browser.wait_timeout(1.5)
-        fill_quick_search(executor.browser, query)
-        executor.browser.wait_timeout(3)
+        quick_search: dict[str, Any] = {"ok": False, "reason": "not-attempted"}
+        modal_state: dict[str, Any] = {"modal_open": False, "websites": [], "keywords": []}
+        report_suggestions: list[dict[str, Any]] = []
+        quick_search_notes: list[str] = []
+        try:
+            executor.browser.press("Ctrl+K")
+            executor.browser.wait_timeout(1.5)
+            fill_quick_search(executor.browser, query)
+            executor.browser.wait_timeout(3)
+            quick_search, modal_state, report_suggestions = extract_quick_search_state(executor.browser)
+        except BrowseError as exc:
+            quick_search_notes.append(f"Quick search extraction failed in this session: {exc}")
 
-        quick_search, modal_state, report_suggestions = extract_quick_search_state(executor.browser)
         clicked_candidate = False
-        report_navigation_ok, route_navigation_used = navigate_to_website_performance(executor.browser, query)
-        if not report_navigation_ok:
-            clicked_candidate = click_exact_website_candidate(executor.browser, query)
-            route_navigation_used = "quick_search_candidate_click" if clicked_candidate else route_navigation_used
+        report_navigation_ok = False
+        route_navigation_used = "not-attempted"
+        try:
+            report_navigation_ok, route_navigation_used = navigate_to_website_performance(executor.browser, query)
+            if not report_navigation_ok:
+                clicked_candidate = click_exact_website_candidate(executor.browser, query)
+                route_navigation_used = "quick_search_candidate_click" if clicked_candidate else route_navigation_used
+        except BrowseError as exc:
+            route_navigation_used = "navigation-error"
+            quick_search_notes.append(f"Website-performance navigation failed in this session: {exc}")
 
         report_snapshot: dict[str, Any] = {}
         if report_navigation_ok or clicked_candidate:
@@ -628,8 +782,8 @@ def collect(query: str, username: str, password: str, session: str, keep_session
             except BrowseError:
                 report_snapshot = {}
 
-        final_url = executor.browser.current_url()
-        final_title = executor.browser.current_title()
+        final_url = executor.browser.try_current_url() or report_snapshot.get("url") or shell_url
+        final_title = executor.browser.try_current_title() or report_snapshot.get("title") or tool_title
         entries = load_network_entries(network_dir)
 
         identities = first_non_null(
@@ -699,9 +853,15 @@ def collect(query: str, username: str, password: str, session: str, keep_session
 
         notes = [
             "3ue Similarweb session opened via dashboard card.",
-            "Quick-search website candidates and report suggestions were captured from the real Similarweb shell.",
-            "Website-performance report metrics were extracted from DOM blocks after entering the 3ue-backed Similarweb shell.",
+            "Capture now tolerates Similarweb shell stalls by falling back to url/title, snapshot, and body-text markers.",
+            "Activation-home priority alerts were extracted when available so the capture can still return structured growth signals even if deeper report routing stalls.",
         ]
+        notes.extend(shell_notes)
+        notes.extend(quick_search_notes)
+        if quick_search.get("ok"):
+            notes.append("Quick-search website candidates and report suggestions were captured from the real Similarweb shell.")
+        if website_performance.get("available"):
+            notes.append("Website-performance report metrics were extracted from DOM blocks after entering the 3ue-backed Similarweb shell.")
         if route_navigation_used == "hash_route_assign":
             notes.append("Report navigation used an authenticated hash-route jump inside the already-open 3ue Similarweb shell.")
         elif route_navigation_used == "direct_route_open_after_entry":
@@ -767,6 +927,7 @@ def collect(query: str, username: str, password: str, session: str, keep_session
                 "autocomplete_websites": normalize_website_rows(autocomplete_websites or []),
                 "autocomplete_keywords": autocomplete_keywords or [],
                 "similar_sites": similar_sites or [],
+                "home_signals": home_signals,
                 "website_performance": website_performance,
             },
         }

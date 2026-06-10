@@ -292,6 +292,33 @@ def build_notes(classified: dict[str, Any]) -> list[str]:
     return notes
 
 
+def open_semrush_overview(
+    executor: Any, query: str, network_dir: str
+) -> tuple[str, str, str, list[dict[str, Any]], list[dict[str, Any]], int]:
+    route = f"https://sem.3ue.com/analytics/overview/?q={query}&searchType=domain"
+    page_url = ""
+    page_title = ""
+    entries: list[dict[str, Any]] = []
+    rpc_results: list[dict[str, Any]] = []
+    attempts_used = 0
+
+    for attempt in range(1, 3):
+        attempts_used = attempt
+        if attempt > 1:
+            executor.ensure_home()
+            executor.browser.wait_timeout(2)
+            network_dir = executor.browser.network_clear()
+        executor.browser.open(route)
+        executor.browser.wait_timeout(12)
+        page_url = executor.browser.try_current_url() or route
+        page_title = executor.browser.try_current_title()
+        entries = load_network_entries(network_dir)
+        rpc_results = flatten_rpc_results(entries)
+        if rpc_results:
+            break
+    return page_url, page_title, network_dir, entries, rpc_results, attempts_used
+
+
 def collect(query: str, username: str, password: str, session: str, keep_session: bool = False) -> dict[str, Any]:
     executor = ThreeUEExecutor(username=username, password=password, session=session)
     try:
@@ -302,15 +329,10 @@ def collect(query: str, username: str, password: str, session: str, keep_session
         executor.ensure_home()
         executor.browser.wait_timeout(2)
 
-        route = f"https://sem.3ue.com/analytics/overview/?q={query}&searchType=domain"
-        executor.browser.open(route)
-        executor.browser.wait_timeout(12)
-        page_url = executor.browser.get("url").get("url")
-        page_title = executor.browser.get("title").get("title")
-
-        entries = load_network_entries(network_dir)
+        page_url, page_title, network_dir, entries, rpc_results, attempts_used = open_semrush_overview(
+            executor, query, network_dir
+        )
         subscription_context = executor.get_subscription_context()
-        rpc_results = flatten_rpc_results(entries)
         classified = classify_rpc_results(rpc_results)
 
         search_bar_context = find_first(entries, "search-bar/api/search?")
@@ -347,8 +369,10 @@ def collect(query: str, username: str, password: str, session: str, keep_session
             },
             "raw_artifacts": {
                 "network_dir": network_dir,
+                "overview_attempts": attempts_used,
                 "rpc_result_count": len(rpc_results),
                 "notes": build_notes(classified)
+                + (["Semrush overview route was retried because the first pass returned no RPC payloads."] if attempts_used > 1 else [])
                 + (["Browser session was closed automatically after capture."] if not keep_session else []),
             },
             "domain_overview": {

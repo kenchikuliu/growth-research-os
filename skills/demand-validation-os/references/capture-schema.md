@@ -71,6 +71,11 @@ Minimum sections:
 }
 ```
 
+Operational notes:
+
+- `raw_artifacts.overview_attempts` records whether the overview route had to be retried because the first pass returned no usable RPC payloads.
+- Prefer running Semrush serially with Similarweb through `scripts/capture_bundle.py` instead of starting both browser-backed captures in parallel.
+
 Recommended item shapes:
 
 ```json
@@ -166,6 +171,18 @@ Collect when a target domain has a reachable report or state artifact.
         ]
       }
     },
+    "home_signals": {
+      "route": "https://sim.3ue.com/#/activation/home",
+      "title": "Activation Setup Page",
+      "priority_alerts": [
+        {
+          "domain": "alibabacloud.com",
+          "new_count": 97,
+          "metric": "landing_pages",
+          "summary": "..."
+        }
+      ]
+    },
     "autocomplete_websites": [],
     "autocomplete_keywords": []
   }
@@ -198,5 +215,71 @@ Recommended item shapes:
 
 - `Similarweb` under 3ue currently has a stronger session coupling than `Semrush`.
 - `网站表现` is the current stable Similarweb report baseline in this skill.
+- `home_signals.priority_alerts` is the current fallback growth-signal layer when Similarweb shell routing is only partially ready.
 - If a deeper target-domain report capture is blocked, still emit `account_state` plus any route/state evidence gathered from favorites, recent items, settings, and autocomplete.
 - Do not silently fake missing report sections. Emit empty arrays and explain the gap in `raw_artifacts.notes`.
+
+## Serial Bundle
+
+When both tools are needed in one run, prefer:
+
+```bash
+python3 scripts/capture_bundle.py --query crazygames.com --output /tmp/crazygames-bundle.json
+```
+
+The bundle format is:
+
+```json
+{
+  "query": {
+    "type": "domain",
+    "value": "crazygames.com"
+  },
+  "capture_mode": "serial",
+  "runs": [
+    {
+      "tool": "semrush",
+      "attempt": 1,
+      "status": "ok",
+      "quality": {
+        "core_ready": true
+      }
+    },
+    {
+      "tool": "similarweb",
+      "attempt": 1,
+      "status": "ok",
+      "quality": {
+        "core_ready": true
+      }
+    }
+  ],
+  "results": {
+    "semrush": {
+      "best_attempt": {
+        "status": "ok",
+        "quality": {
+          "core_ready": true
+        }
+      },
+      "data": {}
+    },
+    "similarweb": {
+      "best_attempt": {
+        "status": "ok",
+        "quality": {
+          "core_ready": true
+        }
+      },
+      "data": {}
+    }
+  },
+  "summary": {
+    "core_ready_tools": [
+      "semrush",
+      "similarweb"
+    ],
+    "all_succeeded": true
+  }
+}
+```
