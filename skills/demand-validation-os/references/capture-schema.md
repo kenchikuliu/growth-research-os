@@ -22,8 +22,8 @@ Every capture JSON should include:
   "account_context": {},
   "capture_method": {
     "login": "automated_3ue_login | existing_session",
-    "primary": "network",
-    "fallback": "dom"
+    "primary": "network | page_json_and_dom",
+    "fallback": "dom | network"
   },
   "raw_artifacts": {
     "network_dir": "",
@@ -136,31 +136,36 @@ Always collect:
 
 ### Level 2: `website_evidence`
 
-Collect when a target domain has a reachable report or state artifact:
+Collect when a target domain has a reachable report or state artifact.
 
 ```json
 {
   "website_evidence": {
     "domain": "crazygames.com",
-    "website_performance_route": {
-      "state_name": "digitalsuite_website_websiteperformance",
-      "params": {
-        "key": "potensic.com",
-        "country": "999",
-        "duration": "3m",
-        "webSource": "Total"
+    "report_navigation_used": "hash_route_assign",
+    "website_performance": {
+      "available": true,
+      "route": "https://sim.3ue.com/#/digitalsuite/websiteanalysis/overview/website-performance/*/999/3m?webSource=Total&key=crazygames.com",
+      "title": "网站表现",
+      "domain": "crazygames.com",
+      "total_visits": {
+        "date_range": "Mar 2026 - May 2026",
+        "geography": "全球",
+        "visits": "315.9M",
+        "change_pct": "8.56%"
+      },
+      "ranks": {
+        "global_rank": "#386"
+      },
+      "traffic_channels": {
+        "rows": [
+          {
+            "channel": "直接",
+            "share": "48.42%"
+          }
+        ]
       }
     },
-    "landing_pages_route": {
-      "state_name": "organicsearch_website_landingpages_v2",
-      "params": {
-        "key": "vercel.app",
-        "country": "999",
-        "duration": "2026.04-2026.04",
-        "webSource": "Total"
-      }
-    },
-    "similar_sites": [],
     "autocomplete_websites": [],
     "autocomplete_keywords": []
   }
@@ -171,12 +176,6 @@ Recommended item shapes:
 
 ```json
 {
-  "similar_sites": [
-    {
-      "domain": "poki.com",
-      "rank": 156
-    }
-  ],
   "autocomplete_websites": [
     {
       "name": "crazygames.com",
@@ -198,5 +197,6 @@ Recommended item shapes:
 ## Notes
 
 - `Similarweb` under 3ue currently has a stronger session coupling than `Semrush`.
-- If full target-domain report capture is blocked, still emit `account_state` plus any route/state evidence gathered from favorites, recent items, settings, and autocomplete.
+- `网站表现` is the current stable Similarweb report baseline in this skill.
+- If a deeper target-domain report capture is blocked, still emit `account_state` plus any route/state evidence gathered from favorites, recent items, settings, and autocomplete.
 - Do not silently fake missing report sections. Emit empty arrays and explain the gap in `raw_artifacts.notes`.

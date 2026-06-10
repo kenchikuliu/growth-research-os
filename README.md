@@ -52,7 +52,8 @@ python3 skills/demand-validation-os/scripts/capture_similarweb.py \
 Current state:
 
 - `Semrush` capture is the stronger structured source and emits overview, competitors, keywords, pages, trend, market, AI, and backlink sections.
-- `Similarweb` capture now reliably opens through the 3ue dashboard card, captures identity/startup/autocomplete evidence, and records quick-search domain suggestions, but full target-domain report extraction is still more session-sensitive.
+- `Similarweb` capture now reliably opens through the 3ue dashboard card, waits for the authenticated shell, and extracts `网站表现` / website-performance report blocks into structured JSON.
+- `Similarweb` still has partial gaps for landing-pages style report automation; website-performance is the stable captured baseline.
 
 ```
 /demand-validation-os

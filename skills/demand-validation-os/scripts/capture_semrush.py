@@ -292,120 +292,125 @@ def build_notes(classified: dict[str, Any]) -> list[str]:
     return notes
 
 
-def collect(query: str, username: str, password: str, session: str) -> dict[str, Any]:
+def collect(query: str, username: str, password: str, session: str, keep_session: bool = False) -> dict[str, Any]:
     executor = ThreeUEExecutor(username=username, password=password, session=session)
-    executor.reset_session()
-    login = executor.login()
-    executor.browser.network_on()
-    network_dir = executor.browser.network_clear()
-    executor.ensure_home()
-    executor.browser.wait_timeout(2)
+    try:
+        executor.reset_session()
+        login = executor.login()
+        executor.browser.network_on()
+        network_dir = executor.browser.network_clear()
+        executor.ensure_home()
+        executor.browser.wait_timeout(2)
 
-    route = f"https://sem.3ue.com/analytics/overview/?q={query}&searchType=domain"
-    executor.browser.open(route)
-    executor.browser.wait_timeout(12)
-    page_url = executor.browser.get("url").get("url")
-    page_title = executor.browser.get("title").get("title")
+        route = f"https://sem.3ue.com/analytics/overview/?q={query}&searchType=domain"
+        executor.browser.open(route)
+        executor.browser.wait_timeout(12)
+        page_url = executor.browser.get("url").get("url")
+        page_title = executor.browser.get("title").get("title")
 
-    entries = load_network_entries(network_dir)
-    subscription_context = executor.get_subscription_context()
-    rpc_results = flatten_rpc_results(entries)
-    classified = classify_rpc_results(rpc_results)
+        entries = load_network_entries(network_dir)
+        subscription_context = executor.get_subscription_context()
+        rpc_results = flatten_rpc_results(entries)
+        classified = classify_rpc_results(rpc_results)
 
-    search_bar_context = find_first(entries, "search-bar/api/search?")
-    current_market = pick_market_row(classified["market_samples_current"], "us") or {}
-    latest_database_daily = classified["database_trend_daily"][-1] if classified["database_trend_daily"] else {}
-    latest_domain_daily = classified["domain_trend_daily"][-1] if classified["domain_trend_daily"] else {}
-    backlink_overview = classified["backlink_overview"] or {}
-    anchor_backlink_profile = classified["anchor_backlink_profile"] or {}
-    ai_overview = classified["ai_overview"] or {}
-    ai_sources = classified["ai_sources"] or {}
-    top_topics = classified["top_topics"] or {}
-    auditing = subscription_context.get("auditing") or {}
-    auditing_items = auditing.get("data", []) if isinstance(auditing, dict) else []
-    fallback_snapshot_date = auditing_items[0].get("date") if auditing_items else None
+        search_bar_context = find_first(entries, "search-bar/api/search?")
+        current_market = pick_market_row(classified["market_samples_current"], "us") or {}
+        latest_database_daily = classified["database_trend_daily"][-1] if classified["database_trend_daily"] else {}
+        latest_domain_daily = classified["domain_trend_daily"][-1] if classified["domain_trend_daily"] else {}
+        backlink_overview = classified["backlink_overview"] or {}
+        anchor_backlink_profile = classified["anchor_backlink_profile"] or {}
+        ai_overview = classified["ai_overview"] or {}
+        ai_sources = classified["ai_sources"] or {}
+        top_topics = classified["top_topics"] or {}
+        auditing = subscription_context.get("auditing") or {}
+        auditing_items = auditing.get("data", []) if isinstance(auditing, dict) else []
+        fallback_snapshot_date = auditing_items[0].get("date") if auditing_items else None
 
-    output = {
-        "tool": "semrush",
-        "query": {"type": "domain", "value": query},
-        "source": {
-            "provider": "3ue",
-            "dashboard": "https://dash.3ue.com/zh-Hans/#/page/m/home",
-            "tool_url": page_url,
-            "captured_at": iso_utc_now(),
-        },
-        "account_context": {
-            "login": login,
-            "subscription": subscription_context.get("subscription"),
-            "auditing": auditing,
-        },
-        "capture_method": {
-            "login": "automated_3ue_login",
-            "primary": "network",
-            "fallback": "dom",
-        },
-        "raw_artifacts": {
-            "network_dir": network_dir,
-            "rpc_result_count": len(rpc_results),
-            "notes": build_notes(classified),
-        },
-        "domain_overview": {
-            "domain": query,
-            "database": "us",
-            "snapshot_date": latest_database_daily.get("date") or fallback_snapshot_date,
-            "page_title": page_title,
-            "is_root_domain": classified["is_root_domain"].get("isRootDomain") if classified["is_root_domain"] else None,
-            "authority_score": backlink_overview.get("authorityScore"),
-            "organic_traffic": current_market.get("organicTraffic"),
-            "organic_traffic_branded": current_market.get("organicTrafficBranded"),
-            "organic_traffic_non_branded": current_market.get("organicTrafficNonBranded"),
-            "paid_traffic": current_market.get("adwordsTraffic"),
-            "organic_positions": current_market.get("organicPositions"),
-            "adwords_positions": current_market.get("adwordsPositions"),
-            "organic_keywords": classified["keyword_distribution"].get("totalPositions") if classified["keyword_distribution"] else None,
-            "traffic": current_market.get("traffic"),
-            "backlinks": backlink_overview.get("backlinks"),
-            "referring_domains": backlink_overview.get("referringDomains"),
-            "global_rank": current_market.get("rank"),
-        },
-        "search_bar_context": search_bar_context,
-        "organic_competitors": normalize_competitor_rows(classified["organic_competitors"]),
-        "competitor_intersections": normalize_intersection_rows(classified["competitor_intersections"]),
-        "top_organic_keywords": normalize_keyword_rows(classified["top_organic_keywords"]),
-        "top_pages": normalize_page_rows(classified["top_pages"]),
-        "database_trend_daily": normalize_trend_rows(classified["database_trend_daily"]),
-        "database_trend_monthly": normalize_trend_rows(classified["database_trend_monthly"]),
-        "domain_trend_daily": normalize_trend_rows(classified["domain_trend_daily"]),
-        "domain_trend_monthly": normalize_trend_rows(classified["domain_trend_monthly"]),
-        "keyword_distribution": classified["keyword_distribution"],
-        "top_topics": normalize_topic_rows(top_topics),
-        "markets_current": normalize_market_rows(classified["market_samples_current"]),
-        "markets_snapshot": normalize_market_rows(classified["market_samples_snapshot"]),
-        "ai_overview": {
-            "visibility": ai_overview.get("ai_visibility"),
-            "visibility_benchmark": ai_overview.get("ai_visibility_benchmark"),
-            "cited_pages": ai_overview.get("cited_pages"),
-            "mention_stats": ai_overview.get("mention_stats", []),
-            "sources": ai_sources.get("sources", []),
-            "country_breakdown": classified["ai_countries"][:20],
-        },
-        "backlink_overview": {
-            "authority_score": backlink_overview.get("authorityScore"),
-            "backlinks": backlink_overview.get("backlinks"),
-            "health": backlink_overview.get("health"),
-            "link_power": backlink_overview.get("linkPower"),
-            "naturalness": backlink_overview.get("naturalness"),
-            "referring_domains": backlink_overview.get("referringDomains"),
-            "top_anchors": anchor_backlink_profile.get("anchors", [])[:10],
-            "top_referral_domains": anchor_backlink_profile.get("referralDomains", [])[:10],
-            "top_pages": anchor_backlink_profile.get("pages", [])[:10],
-        },
-        "debug": {
-            "latest_database_daily": latest_database_daily,
-            "latest_domain_daily": latest_domain_daily,
-        },
-    }
-    return output
+        output = {
+            "tool": "semrush",
+            "query": {"type": "domain", "value": query},
+            "source": {
+                "provider": "3ue",
+                "dashboard": "https://dash.3ue.com/zh-Hans/#/page/m/home",
+                "tool_url": page_url,
+                "captured_at": iso_utc_now(),
+            },
+            "account_context": {
+                "login": login,
+                "subscription": subscription_context.get("subscription"),
+                "auditing": auditing,
+            },
+            "capture_method": {
+                "login": "automated_3ue_login",
+                "primary": "network",
+                "fallback": "dom",
+            },
+            "raw_artifacts": {
+                "network_dir": network_dir,
+                "rpc_result_count": len(rpc_results),
+                "notes": build_notes(classified)
+                + (["Browser session was closed automatically after capture."] if not keep_session else []),
+            },
+            "domain_overview": {
+                "domain": query,
+                "database": "us",
+                "snapshot_date": latest_database_daily.get("date") or fallback_snapshot_date,
+                "page_title": page_title,
+                "is_root_domain": classified["is_root_domain"].get("isRootDomain") if classified["is_root_domain"] else None,
+                "authority_score": backlink_overview.get("authorityScore"),
+                "organic_traffic": current_market.get("organicTraffic"),
+                "organic_traffic_branded": current_market.get("organicTrafficBranded"),
+                "organic_traffic_non_branded": current_market.get("organicTrafficNonBranded"),
+                "paid_traffic": current_market.get("adwordsTraffic"),
+                "organic_positions": current_market.get("organicPositions"),
+                "adwords_positions": current_market.get("adwordsPositions"),
+                "organic_keywords": classified["keyword_distribution"].get("totalPositions") if classified["keyword_distribution"] else None,
+                "traffic": current_market.get("traffic"),
+                "backlinks": backlink_overview.get("backlinks"),
+                "referring_domains": backlink_overview.get("referringDomains"),
+                "global_rank": current_market.get("rank"),
+            },
+            "search_bar_context": search_bar_context,
+            "organic_competitors": normalize_competitor_rows(classified["organic_competitors"]),
+            "competitor_intersections": normalize_intersection_rows(classified["competitor_intersections"]),
+            "top_organic_keywords": normalize_keyword_rows(classified["top_organic_keywords"]),
+            "top_pages": normalize_page_rows(classified["top_pages"]),
+            "database_trend_daily": normalize_trend_rows(classified["database_trend_daily"]),
+            "database_trend_monthly": normalize_trend_rows(classified["database_trend_monthly"]),
+            "domain_trend_daily": normalize_trend_rows(classified["domain_trend_daily"]),
+            "domain_trend_monthly": normalize_trend_rows(classified["domain_trend_monthly"]),
+            "keyword_distribution": classified["keyword_distribution"],
+            "top_topics": normalize_topic_rows(top_topics),
+            "markets_current": normalize_market_rows(classified["market_samples_current"]),
+            "markets_snapshot": normalize_market_rows(classified["market_samples_snapshot"]),
+            "ai_overview": {
+                "visibility": ai_overview.get("ai_visibility"),
+                "visibility_benchmark": ai_overview.get("ai_visibility_benchmark"),
+                "cited_pages": ai_overview.get("cited_pages"),
+                "mention_stats": ai_overview.get("mention_stats", []),
+                "sources": ai_sources.get("sources", []),
+                "country_breakdown": classified["ai_countries"][:20],
+            },
+            "backlink_overview": {
+                "authority_score": backlink_overview.get("authorityScore"),
+                "backlinks": backlink_overview.get("backlinks"),
+                "health": backlink_overview.get("health"),
+                "link_power": backlink_overview.get("linkPower"),
+                "naturalness": backlink_overview.get("naturalness"),
+                "referring_domains": backlink_overview.get("referringDomains"),
+                "top_anchors": anchor_backlink_profile.get("anchors", [])[:10],
+                "top_referral_domains": anchor_backlink_profile.get("referralDomains", [])[:10],
+                "top_pages": anchor_backlink_profile.get("pages", [])[:10],
+            },
+            "debug": {
+                "latest_database_daily": latest_database_daily,
+                "latest_domain_daily": latest_domain_daily,
+            },
+        }
+        return output
+    finally:
+        if not keep_session:
+            executor.stop()
 
 
 def main() -> int:
@@ -415,12 +420,13 @@ def main() -> int:
     parser.add_argument("--password", default=os.environ.get("THREEUE_PASSWORD", ""))
     parser.add_argument("--session", default="dvos-sem")
     parser.add_argument("--output", help="Write JSON to a file")
+    parser.add_argument("--keep-session", action="store_true", help="Keep the browse session open after capture")
     args = parser.parse_args()
 
     if not args.username or not args.password:
         raise SystemExit("Missing 3ue credentials. Set THREEUE_USERNAME and THREEUE_PASSWORD or pass --username/--password.")
 
-    data = collect(args.query, args.username, args.password, args.session)
+    data = collect(args.query, args.username, args.password, args.session, keep_session=args.keep_session)
     text = json.dumps(data, ensure_ascii=False, indent=2)
     if args.output:
         Path(args.output).write_text(text)

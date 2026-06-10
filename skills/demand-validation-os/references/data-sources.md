@@ -82,7 +82,9 @@ Automation note:
 
 - under 3ue, Similarweb is more sensitive to session and route transitions than Semrush
 - prefer capture scripts to start from the 3ue dashboard card, not direct public Similarweb URLs
-- if full report routing fails, keep account-state evidence and route candidates instead of fabricating page-level proof
+- `网站表现` / website-performance is the current stable Similarweb automation baseline
+- landing-pages and some deeper report families are still more session-sensitive
+- if deeper report routing fails, keep account-state evidence and route candidates instead of fabricating page-level proof
 
 ## Semrush
 
@@ -109,3 +111,4 @@ Automation note:
 - Semrush is currently the stronger structured source in this skill
 - `dpa/rpc` responses already provide stable machine-readable payloads for overview, competitors, keywords, topics, AI, and backlinks
 - prefer `scripts/capture_semrush.py` when you need repeatable JSON, not manual copy from the page
+- the automation session now closes itself after capture unless `--keep-session` is passed

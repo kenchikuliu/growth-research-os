@@ -113,6 +113,18 @@ class BrowseClient:
             args.append(selector)
         return self.run(*args, timeout=timeout)
 
+    def current_url(self, timeout: int = 15) -> str:
+        data = self.get("url", timeout=timeout)
+        if isinstance(data, dict):
+            return str(data.get("url", ""))
+        return str(data or "")
+
+    def current_title(self, timeout: int = 15) -> str:
+        data = self.get("title", timeout=timeout)
+        if isinstance(data, dict):
+            return str(data.get("title", ""))
+        return str(data or "")
+
     def press(self, key: str, timeout: int = 15) -> Any:
         return self.run("press", key, timeout=timeout)
 
@@ -186,6 +198,24 @@ class BrowseClient:
             return str(data["path"])
         return ""
 
+    def wait_for_url_contains_any(
+        self,
+        fragments: list[str] | tuple[str, ...],
+        timeout: int = 30,
+        poll_seconds: float = 1.0,
+    ) -> str:
+        deadline = time.time() + timeout
+        last_url = ""
+        while time.time() < deadline:
+            last_url = self.current_url(timeout=15)
+            if any(fragment in last_url for fragment in fragments):
+                return last_url
+            time.sleep(poll_seconds)
+        raise BrowseError(
+            f"Timed out after {timeout}s waiting for url to contain one of {list(fragments)!r}. "
+            f"Last url: {last_url}"
+        )
+
 
 class ThreeUEExecutor:
     def __init__(self, username: str, password: str, session: str = "dvos") -> None:
@@ -196,6 +226,9 @@ class ThreeUEExecutor:
     def reset_session(self) -> None:
         self.browser.stop(ignore_errors=True)
         time.sleep(1)
+
+    def stop(self) -> None:
+        self.browser.stop(ignore_errors=True)
 
     def login(self) -> dict[str, Any]:
         self.browser.open(DEFAULT_DASHBOARD_URL, timeout=90)
@@ -291,12 +324,18 @@ class ThreeUEExecutor:
             result = {"ok": False, "count": len(refs), "reason": "open-button-ref-missing"}
         else:
             result = self.browser.click(f"@{refs[index]}", timeout=30)
-        self.browser.wait_timeout(5)
+        try:
+            self.browser.wait_timeout(5)
+        except BrowseError:
+            pass
         pages = self.browser.pages()
         target_index = len(pages) - 1 if pages else 0
         if pages and len(pages) >= len(pages_before):
             self.browser.tab_switch(target_index)
-            self.browser.wait_timeout(1)
+            try:
+                self.browser.wait_timeout(1)
+            except BrowseError:
+                pass
             pages = self.browser.pages()
         active = pages[target_index] if pages else {}
         return {

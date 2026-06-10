@@ -161,6 +161,7 @@ Current behavior:
 - captures network payloads
 - extracts `dpa/rpc` responses into structured JSON
 - uses a dedicated browser session so Similarweb and Semrush captures do not pollute each other
+- closes the automation browser session automatically unless `--keep-session` is passed
 
 Primary sections:
 
@@ -188,14 +189,17 @@ Current behavior:
 
 - logs into `dash.3ue.com`
 - opens Similarweb only through the 3ue card
+- waits for the authenticated Similarweb shell to become DOM-ready
 - captures account-state and target-domain suggestion evidence
-- extracts identity, startup settings, autocomplete suggestions, and quick-search report candidates
+- extracts identity, startup settings, autocomplete suggestions, quick-search report candidates, and `网站表现` / website-performance report blocks
 - uses a dedicated browser session so Similarweb and Semrush captures do not pollute each other
+- closes the automation browser session automatically unless `--keep-session` is passed
 
 Current limitation:
 
-- full target-domain report capture is more session-sensitive than Semrush
-- if direct report navigation is not stable, the script still emits useful `account_state` and `website_evidence` instead of pretending a report was reached
+- `网站表现` is now the stable Similarweb baseline capture
+- landing-pages and some deeper report families are still more session-sensitive than Semrush
+- if a deeper report cannot be reached, the script still emits useful `account_state` and route evidence instead of pretending a report was reached
 
 ## Scorecards
 
