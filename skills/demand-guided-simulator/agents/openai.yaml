@@ -1,0 +1,4 @@
+interface:
+  display_name: "Demand Guided Simulator"
+  short_description: "Stage SEO decisions like a simulator."
+  default_prompt: "Use $demand-guided-simulator to turn SEO evidence into a staged guided workflow."

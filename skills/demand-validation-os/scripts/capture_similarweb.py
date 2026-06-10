@@ -16,9 +16,15 @@ from browser_capture import BrowseError, ThreeUEExecutor, extract_usage_limit_st
 
 
 WEBSITE_PERFORMANCE_ROUTE_FRAGMENT = "/websiteanalysis/overview/website-performance/"
+WEBSITE_CONTENT_ROUTE_FRAGMENT = "/websiteanalysis/overview/website-content/"
+SEARCH_OVERVIEW_ROUTE_FRAGMENT = "/websiteanalysis/search-overview/"
 ACTIVATION_HOME_FRAGMENT = "/#/activation/home"
 DIGITALSUITE_HOME_FRAGMENT = "/#/digitalsuite/home"
 SEARCH_BOX_TEXT = "搜索任何网站、关键词或报告"
+DATE_RANGE_RE = re.compile(r"[A-Z][a-z]{2} \d{4} - [A-Z][a-z]{2} \d{4}")
+PERCENT_RE = r"(?:< ?\d+(?:\.\d+)?%|> ?\d+(?:\.\d+)?%|-?[\d,]+(?:\.\d+)?%)"
+VALUE_RE = r"[\d.]+[KMB]?"
+MONEY_RE = r"\$[\d.]+(?:[KMB])?"
 PRIORITY_ALERT_HEADER_RE = re.compile(
     r"^(?P<domain>[^\s]+)有\s+(?P<count>\d+)\s+个新 Organic (?P<metric>landing pages|keywords)\s*(?P<summary>.*)$",
     re.S,
@@ -70,6 +76,63 @@ def build_website_performance_route(query: str) -> str:
         "/#/digitalsuite/websiteanalysis/overview/website-performance/"
         f"*/999/3m?webSource=Total&key={quote(query, safe='')}"
     )
+
+
+def build_website_content_route(query: str) -> str:
+    return (
+        "/#/digitalsuite/websiteanalysis/overview/website-content/"
+        f"*/999/3m?webSource=Total&key={quote(query, safe='')}&selectedTab=Folders"
+    )
+
+
+def build_search_overview_route(query: str) -> str:
+    return (
+        "/#/digitalsuite/websiteanalysis/search-overview/"
+        f"*/999/3m?webSource=Total&key={quote(query, safe='')}&performanceOverTimeChartCurrency=USD"
+    )
+
+
+def collapse_report_text(text: str | None) -> str:
+    return re.sub(r"\s+", " ", " ".join(non_empty_lines(text))).strip()
+
+
+def extract_report_text_block(page_text: str | None, title: str) -> str:
+    collapsed = collapse_report_text(page_text)
+    if not collapsed:
+        return ""
+    matches = list(re.finditer(rf"{re.escape(title)}\s*{DATE_RANGE_RE.pattern}", collapsed))
+    if matches:
+        collapsed = collapsed[matches[-1].start() :]
+    else:
+        idx = collapsed.rfind(title)
+        if idx >= 0:
+            collapsed = collapsed[idx:]
+    for marker in ("用户指南", "How can we help", "Please use the search bar"):
+        idx = collapsed.find(marker)
+        if idx >= 0:
+            collapsed = collapsed[:idx]
+    return collapsed.strip()
+
+
+def find_last_match(pattern: str, text: str) -> re.Match[str] | None:
+    matches = list(re.finditer(pattern, text))
+    return matches[-1] if matches else None
+
+
+def normalize_growth_keyword(value: str) -> dict[str, Any]:
+    raw = value.strip()
+    match = re.match(r"^(?P<label>.+?)\(\+(?P<count>[\d,]+)\)$", raw)
+    if not match:
+        return {
+            "keyword": raw,
+            "new_keywords": None,
+            "raw": raw,
+        }
+    return {
+        "keyword": match.group("label").strip(),
+        "new_keywords": int(match.group("count").replace(",", "")),
+        "raw": raw,
+    }
 
 
 def extract_shell_markers(snapshot: Any, body_text: str, eval_state: Any) -> dict[str, Any]:
@@ -180,6 +243,38 @@ def wait_for_website_performance_ready(browser: Any, timeout: int = 60) -> dict[
             return state
         time.sleep(1.0)
     raise BrowseError(f"Timed out waiting for Similarweb website-performance DOM: {last_state}")
+
+
+def wait_for_route_ready(
+    browser: Any,
+    route_fragment: str,
+    title_contains: str,
+    body_markers: list[str],
+    timeout: int = 60,
+) -> dict[str, Any]:
+    deadline = time.time() + timeout
+    last_state: dict[str, Any] = {}
+    while time.time() < deadline:
+        url = browser.current_url(timeout=10)
+        title = browser.current_title(timeout=10)
+        body_text = browser.try_get_text("body", timeout=20)
+        snapshot = browser.try_snapshot(timeout=20)
+        tree = snapshot.get("tree", "") if isinstance(snapshot, dict) else ""
+        state = {
+            "href": url,
+            "title": title,
+            "body_markers": {marker: marker in body_text for marker in body_markers},
+            "tree_markers": {marker: marker in tree for marker in body_markers},
+        }
+        last_state = state
+        if route_fragment in url and (
+            title_contains in title
+            or any(marker in body_text for marker in body_markers)
+            or any(marker in tree for marker in body_markers)
+        ):
+            return state
+        time.sleep(1.0)
+    raise BrowseError(f"Timed out waiting for Similarweb route {route_fragment}: {last_state}")
 
 
 def parse_priority_alert_row(raw_text: str) -> dict[str, Any] | None:
@@ -501,6 +596,217 @@ def parse_keyword_breakdown(page_text: str | None, section_title: str, next_titl
     return result
 
 
+def parse_website_content(page_text: str | None) -> dict[str, Any] | None:
+    lines = non_empty_lines(page_text)
+    collapsed = collapse_report_text(page_text)
+    count_match = re.search(r"文件夹 \((?P<count>\d+)\)", collapsed)
+    if not count_match:
+        return None
+
+    total_folders = int(count_match.group("count"))
+    selected_match = re.search(r"(?P<count>\d+) 个文件夹已选中", collapsed)
+    tabs = [line for line in lines[:8] if line in {"文件夹", "业务线", "NEW", "热门页面", "子域"}]
+    filters = [line for line in lines if line in {"所有", "新建", "时下流行"}]
+
+    rows: list[dict[str, Any]] = []
+    table_start = None
+    for idx, line in enumerate(lines):
+        if re.fullmatch(r"文件夹 \(\d+\)", line):
+            table_start = idx
+            break
+    if table_start is not None:
+        data_lines = lines[table_start + 3 :]
+        cursor = 0
+        while cursor + 3 < len(data_lines):
+            rank_line = data_lines[cursor]
+            if not re.fullmatch(r"\d+", rank_line):
+                cursor += 1
+                continue
+            rows.append(
+                {
+                    "rank": int(rank_line),
+                    "folder": data_lines[cursor + 1],
+                    "share": data_lines[cursor + 2],
+                    "month_over_month_change": data_lines[cursor + 3],
+                }
+            )
+            cursor += 4
+
+    return {
+        "total_folders": total_folders,
+        "selected_folder_count": int(selected_match.group("count")) if selected_match else None,
+        "tabs": tabs,
+        "filters": filters,
+        "rows": rows,
+        "visible_row_count": len(rows),
+    }
+
+
+def parse_search_overview_summary(page_text: str | None) -> dict[str, Any]:
+    collapsed = extract_report_text_block(page_text, "概况")
+    summary: dict[str, Any] = {}
+
+    overview_match = re.search(
+        rf"概况\s+(?P<date_range>{DATE_RANGE_RE.pattern})\s+(?P<geography>\S+)\s+(?P<traffic_source>\S+)\s+"
+        rf"搜索流量\s+(?P<traffic>{VALUE_RE})\s+(?P<traffic_yoy>{PERCENT_RE}) 年同比\s+"
+        rf"(?P<share_of_total>{PERCENT_RE})\s+的总流量占比",
+        collapsed,
+    )
+    if overview_match:
+        summary["overview"] = overview_match.groupdict()
+
+    organic_match = re.search(
+        rf"自然流量\s+(?P<traffic>{VALUE_RE})\s+(?P<traffic_yoy>{PERCENT_RE}) 年同比\s+"
+        rf"(?P<share_of_search>{PERCENT_RE})\s+的搜索流量\s+(?P<keywords>{VALUE_RE})\s+关键词\s+"
+        rf"(?P<keywords_yoy>{PERCENT_RE})\s*年同比",
+        collapsed,
+    )
+    if organic_match:
+        summary["organic"] = organic_match.groupdict()
+
+    paid_match = re.search(
+        rf"付费流量\s+(?P<traffic>{VALUE_RE})\s+(?P<traffic_yoy>{PERCENT_RE}) 年同比\s+"
+        rf"(?P<share_of_search>{PERCENT_RE})\s+的搜索流量\s+(?P<keywords>{VALUE_RE})\s+关键词\s+"
+        rf"(?P<keywords_yoy>{PERCENT_RE})\s*年同比",
+        collapsed,
+    )
+    if paid_match:
+        summary["paid"] = paid_match.groupdict()
+
+    ranking_match = re.search(
+        rf"排名 1-3\s+(?P<count>[\d,]+)\s+(?P<mom_change>{PERCENT_RE}) 月同比\s+"
+        rf"(?P<keyword_share>{PERCENT_RE})\s+关键词\s+(?P<snapshot>.+?)\s+单次点击付费支出",
+        collapsed,
+    )
+    if ranking_match:
+        summary["ranking_1_3"] = ranking_match.groupdict()
+
+    cpc_match = re.search(
+        rf"单次点击付费支出\s+(?P<spend>{MONEY_RE})\s+(?P<spend_yoy>{PERCENT_RE}) 年同比\s+"
+        rf"(?P<cost_per_visit>{MONEY_RE})\s+单次付费访问成本",
+        collapsed,
+    )
+    if cpc_match:
+        summary["paid_cost"] = cpc_match.groupdict()
+
+    brand_match = re.search(
+        rf"品牌流量\s+品牌\s+(?P<branded>{PERCENT_RE})\s+非品牌\s+(?P<non_branded>{PERCENT_RE})",
+        collapsed,
+    )
+    if brand_match:
+        summary["brand_vs_non_brand"] = brand_match.groupdict()
+
+    perf_block = collapsed.split("绩效", 1)[-1] if "绩效" in collapsed else collapsed
+    perf_match = find_last_match(
+        rf"自然流量\s+(?P<organic>{PERCENT_RE})\s+付费流量\s+(?P<paid>{PERCENT_RE})",
+        perf_block,
+    )
+    if perf_match:
+        summary["organic_vs_paid_mix"] = perf_match.groupdict()
+
+    return summary
+
+
+def parse_top_non_brand_keywords(page_text: str | None) -> dict[str, Any] | None:
+    lines = non_empty_lines(page_text)
+    try:
+        start = lines.index("热门非品牌关键词")
+        end = lines.index("探索竞争对手的策略", start + 1)
+    except ValueError:
+        return None
+
+    section = lines[start:end]
+    try:
+        header_idx = section.index("有机 vs 付费")
+    except ValueError:
+        return None
+
+    rows: list[dict[str, Any]] = []
+    data_lines = section[header_idx + 1 :]
+    cursor = 0
+    while cursor + 5 < len(data_lines):
+        keyword = data_lines[cursor]
+        clicks = data_lines[cursor + 1]
+        share = data_lines[cursor + 2]
+        yoy_change = data_lines[cursor + 3]
+        organic_share = data_lines[cursor + 4]
+        paid_share = data_lines[cursor + 5]
+        if not re.fullmatch(VALUE_RE, clicks):
+            cursor += 1
+            continue
+        rows.append(
+            {
+                "keyword": keyword,
+                "clicks": clicks,
+                "share": share,
+                "year_over_year_change": yoy_change,
+                "organic_share": organic_share,
+                "paid_share": paid_share,
+            }
+        )
+        cursor += 6
+
+    return {
+        "date_range": section[1] if len(section) > 1 else None,
+        "geography": section[2] if len(section) > 2 else None,
+        "traffic_source": section[3] if len(section) > 3 else None,
+        "rows": rows,
+    }
+
+
+def looks_like_similarweb_url_row(value: str) -> bool:
+    return "." in value and " " not in value and value.count("/") >= 1 or re.fullmatch(r"(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?:/.*)?", value) is not None
+
+
+def parse_paid_landing_pages(page_text: str | None) -> dict[str, Any] | None:
+    lines = non_empty_lines(page_text)
+    try:
+        start = lines.index("付费登录页")
+    except ValueError:
+        return None
+    section = lines[start:]
+    try:
+        header_idx = section.index("热搜关键词")
+    except ValueError:
+        return None
+
+    rows: list[dict[str, Any]] = []
+    data_lines = section[header_idx + 1 :]
+    cursor = 0
+    while cursor < len(data_lines):
+        if data_lines[cursor].startswith("查看所有付费落地页"):
+            break
+        url = data_lines[cursor]
+        if not looks_like_similarweb_url_row(url):
+            cursor += 1
+            continue
+        if cursor + 4 >= len(data_lines):
+            break
+        keyword = data_lines[cursor + 4]
+        growth = None
+        cursor_advance = 5
+        if cursor + 5 < len(data_lines) and re.fullmatch(r"\(\+\d[\d,]*\)", data_lines[cursor + 5]):
+            growth = data_lines[cursor + 5]
+            cursor_advance = 6
+        rows.append(
+            {
+                "url": url,
+                "clicks": data_lines[cursor + 1],
+                "share": data_lines[cursor + 2],
+                "month_over_month_change": data_lines[cursor + 3],
+                "top_keyword": normalize_growth_keyword(f"{keyword}{growth or ''}") if growth else normalize_growth_keyword(keyword),
+            }
+        )
+        cursor += cursor_advance
+
+    return {
+        "date_range": section[1] if len(section) > 1 else None,
+        "geography": section[2] if len(section) > 2 else None,
+        "traffic_source": section[3] if len(section) > 3 else None,
+        "rows": rows,
+    }
+
+
 def extract_report_snapshot(browser: Any) -> dict[str, Any]:
     return browser.eval(
         """
@@ -698,6 +1004,33 @@ def build_website_performance(report_snapshot: dict[str, Any]) -> dict[str, Any]
     }
 
 
+def build_website_content(report_snapshot: dict[str, Any]) -> dict[str, Any]:
+    page_text = report_snapshot.get("page_frame_text")
+    parsed = parse_website_content(page_text)
+    return {
+        "available": WEBSITE_CONTENT_ROUTE_FRAGMENT in (report_snapshot.get("url") or ""),
+        "route": report_snapshot.get("url"),
+        "title": report_snapshot.get("title"),
+        "domain": report_snapshot.get("query_domain"),
+        "summary": parsed,
+    }
+
+
+def build_search_overview(report_snapshot: dict[str, Any]) -> dict[str, Any]:
+    page_text = report_snapshot.get("page_frame_text")
+    top_non_brand_keywords = parse_top_non_brand_keywords(page_text)
+    paid_landing_pages = parse_paid_landing_pages(page_text)
+    return {
+        "available": SEARCH_OVERVIEW_ROUTE_FRAGMENT in (report_snapshot.get("url") or ""),
+        "route": report_snapshot.get("url"),
+        "title": report_snapshot.get("title"),
+        "domain": report_snapshot.get("query_domain"),
+        "summary": parse_search_overview_summary(page_text),
+        "top_non_brand_keywords": top_non_brand_keywords,
+        "paid_landing_pages": paid_landing_pages,
+    }
+
+
 def navigate_to_website_performance(browser: Any, query: str) -> tuple[bool, str]:
     route = build_website_performance_route(query)
     target = f"https://sim.3ue.com{route}"
@@ -723,6 +1056,67 @@ def navigate_to_website_performance(browser: Any, query: str) -> tuple[bool, str
         return True, "direct_route_open_after_entry"
     except BrowseError:
         return False, "unresolved"
+
+
+def navigate_to_route(
+    browser: Any,
+    route: str,
+    route_fragment: str,
+    title_contains: str,
+    body_markers: list[str],
+) -> tuple[bool, str]:
+    target = f"https://sim.3ue.com{route}"
+    try:
+        browser.eval(
+            f"""
+            (() => {{
+              window.location.assign({json.dumps(target)});
+              return {{ ok: true, target: {json.dumps(target)} }};
+            }})()
+            """,
+            timeout=20,
+        )
+        wait_for_route_ready(browser, route_fragment, title_contains, body_markers, timeout=45)
+        return True, "hash_route_assign"
+    except BrowseError:
+        pass
+    try:
+        browser.open(target, timeout=90)
+        wait_for_route_ready(browser, route_fragment, title_contains, body_markers, timeout=45)
+        return True, "direct_route_open_after_entry"
+    except BrowseError:
+        return False, "unresolved"
+
+
+def find_route_hint(report_links: list[dict[str, Any]], route_fragment: str) -> str | None:
+    for item in report_links:
+        href = str(item.get("href") or "")
+        if route_fragment in href:
+            return href
+    return None
+
+
+def capture_deep_route_snapshot(
+    browser: Any,
+    route: str | None,
+    route_fragment: str,
+    title_contains: str,
+    body_markers: list[str],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if not route:
+        return {}, {"ok": False, "reason": "route-hint-missing"}
+    ok, method = navigate_to_route(
+        browser,
+        route=route,
+        route_fragment=route_fragment,
+        title_contains=title_contains,
+        body_markers=body_markers,
+    )
+    if not ok:
+        return {}, {"ok": False, "reason": "route-navigation-failed", "method": method, "route": route}
+    browser.wait_timeout(3)
+    snapshot = extract_report_snapshot(browser)
+    return snapshot, {"ok": True, "method": method, "route": route}
 
 
 def capture_usage_limit_event(browser: Any, stage: str, node_index: int | None) -> dict[str, Any] | None:
@@ -769,6 +1163,12 @@ def collect(
             clicked_candidate = False
             route_navigation_used = "not-attempted"
             report_snapshot: dict[str, Any] = {}
+            website_content_snapshot: dict[str, Any] = {}
+            search_overview_snapshot: dict[str, Any] = {}
+            deep_route_status: dict[str, Any] = {
+                "website_content": {"ok": False, "reason": "not-attempted"},
+                "search_overview": {"ok": False, "reason": "not-attempted"},
+            }
 
             for node_round in range(max_node_rotations + 1):
                 if node_round > 0:
@@ -866,6 +1266,23 @@ def collect(
                         wait_for_website_performance_ready(executor.browser, timeout=60)
                         executor.browser.wait_timeout(3)
                         report_snapshot = extract_report_snapshot(executor.browser)
+                        report_links = report_snapshot.get("report_links") or []
+                        website_content_route = find_route_hint(report_links, WEBSITE_CONTENT_ROUTE_FRAGMENT)
+                        website_content_snapshot, deep_route_status["website_content"] = capture_deep_route_snapshot(
+                            executor.browser,
+                            route=website_content_route,
+                            route_fragment=WEBSITE_CONTENT_ROUTE_FRAGMENT,
+                            title_contains="网站内容",
+                            body_markers=["文件夹", "业务线", "热门页面"],
+                        )
+                        search_overview_route = find_route_hint(report_links, SEARCH_OVERVIEW_ROUTE_FRAGMENT)
+                        search_overview_snapshot, deep_route_status["search_overview"] = capture_deep_route_snapshot(
+                            executor.browser,
+                            route=search_overview_route,
+                            route_fragment=SEARCH_OVERVIEW_ROUTE_FRAGMENT,
+                            title_contains="搜索概况",
+                            body_markers=["搜索流量", "热门非品牌关键词", "付费登录页"],
+                        )
                     except BrowseError:
                         report_snapshot = {}
 
@@ -951,6 +1368,8 @@ def collect(
                 }
 
         website_performance = build_website_performance(report_snapshot)
+        website_content = build_website_content(website_content_snapshot)
+        search_overview = build_search_overview(search_overview_snapshot)
 
         notes = [
             "3ue Similarweb session opened via dashboard card.",
@@ -963,6 +1382,10 @@ def collect(
             notes.append("Quick-search website candidates and report suggestions were captured from the real Similarweb shell.")
         if website_performance.get("available"):
             notes.append("Website-performance report metrics were extracted from DOM blocks after entering the 3ue-backed Similarweb shell.")
+        if website_content.get("available"):
+            notes.append("Website-content folder rows were extracted as page-shape evidence from the authenticated Similarweb shell.")
+        if search_overview.get("available"):
+            notes.append("Search-overview summary, non-brand keyword rows, and paid landing pages were extracted from the authenticated Similarweb shell.")
         if node_switches:
             notes.append("Daily usage limit was detected; Similarweb node was rotated automatically and the shell/report route was retried.")
         if route_navigation_used == "hash_route_assign":
@@ -1033,7 +1456,10 @@ def collect(
                 "autocomplete_keywords": autocomplete_keywords or [],
                 "similar_sites": similar_sites or [],
                 "home_signals": home_signals,
+                "deep_route_status": deep_route_status,
                 "website_performance": website_performance,
+                "website_content": website_content,
+                "search_overview": search_overview,
             },
         }
     finally:

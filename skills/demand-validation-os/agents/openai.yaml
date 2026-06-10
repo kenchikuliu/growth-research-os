@@ -1,0 +1,4 @@
+interface:
+  display_name: "Demand Validation OS"
+  short_description: "Run staged SEO demand diagnosis."
+  default_prompt: "Use $demand-validation-os to validate a demand or explain why a site is growing."

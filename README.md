@@ -33,6 +33,7 @@ Output:
 - attribution or demand decision
 - first batch of pages when applicable
 - optional structured JSON capture from 3ue-backed Similarweb and Semrush sessions
+- optional one-click workflow JSON that also includes gefei, chuhai, Google Trends, and a staged guided flow
 
 Capture scripts:
 
@@ -54,6 +55,17 @@ python3 skills/demand-validation-os/scripts/capture_bundle.py \
   --query crazygames.com \
   --max-node-rotations 2 \
   --output /tmp/crazygames-bundle.json
+
+python3 skills/demand-validation-os/scripts/google_trends.py \
+  --query crazygames \
+  --geo US \
+  --output /tmp/crazygames-trends.json
+
+python3 skills/demand-validation-os/scripts/run_demand_workflow.py \
+  --mode demand \
+  --query "ai image generator" \
+  --domain janitorai.com \
+  --output /tmp/ai-image-generator-workflow.json
 ```
 
 Current state:
@@ -64,9 +76,41 @@ Current state:
 - `Similarweb` now survives more 3ue shell half-load cases and can still emit activation-home priority-alert signals even when deeper routes are fragile.
 - `Similarweb` still has partial gaps for landing-pages style report automation; `网站表现` / website-performance is the stable captured baseline, with structured JSON plus node-switch telemetry.
 - `capture_bundle.py` is the preferred way to run both tools together because it executes them serially and avoids cross-session interference from parallel browser-backed runs.
+- `google_trends.py` now tries official Google Trends first, then can fall back to configured RapidAPI or DataForSEO providers, while keeping a normalized `30d / 90d / 12m / 5y` output shape and recording `provider_attempts`.
+- `run_demand_workflow.py` is the one-click orchestrator that combines gefei, chuhai, Google Trends, Similarweb, Semrush, scorecard logic, and a staged guided-flow layer.
 
 ```
 /demand-validation-os
+```
+
+---
+
+### `/demand-guided-simulator` — Web.cafe-Style Staged SEO Workflow
+
+Turns the demand-validation evidence layer into a contradiction-first guided flow:
+
+- guided path vs direct result
+- one concept per step
+- explicit hidden variable
+- stage-based diagnosis for `新词 / 新需求验证` and `榜单归因`
+- dedicated simulator wrapper with `simulator` / `guided` / `direct` / `step` views
+
+Primary use:
+
+- when a flat report is not enough
+- when the user wants a simulator-like teaching flow
+- when recommendations should be tied to discrete diagnostic stages
+
+```
+/demand-guided-simulator
+```
+
+Example:
+
+```bash
+python3 skills/demand-guided-simulator/scripts/demand_guided_simulator.py \
+  --workflow-input /tmp/crazygames-attribution-deep.json \
+  --view simulator
 ```
 
 ---

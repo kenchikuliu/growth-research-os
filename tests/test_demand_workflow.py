@@ -1,0 +1,575 @@
+from __future__ import annotations
+
+import sys
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS_DIR = ROOT / "skills" / "demand-validation-os" / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+import google_trends
+import guided_flow
+import run_demand_workflow
+import capture_bundle
+import render_report
+
+
+class GoogleTrendsSummaryTests(unittest.TestCase):
+    def test_summarize_timeline_detects_spike(self) -> None:
+        rows = [{"value": value} for value in [5, 6, 8, 60, 12, 9, 8]]
+        summary = google_trends.summarize_timeline(rows)
+        self.assertEqual(summary["shape"], "spike")
+        self.assertEqual(summary["latest_interest"], 8)
+
+    def test_summarize_timeline_detects_rising(self) -> None:
+        rows = [{"value": value} for value in [10, 12, 15, 18, 22, 26, 30]]
+        summary = google_trends.summarize_timeline(rows)
+        self.assertEqual(summary["shape"], "rising")
+        self.assertGreater(summary["pct_change"], 0)
+
+    def test_collect_records_provider_attempts_when_all_providers_unavailable(self) -> None:
+        original_collect_official = google_trends.collect_official
+        original_configured_rapidapi = google_trends.configured_rapidapi
+        original_configured_dataforseo = google_trends.configured_dataforseo
+        try:
+            google_trends.collect_official = lambda *args, **kwargs: google_trends.build_payload(
+                query="ai image generator",
+                geo="US",
+                hl="en-US",
+                property_name="web",
+                provider="google-trends",
+                windows=[google_trends.build_empty_window("today 3-m", provider="google-trends", error="429")],
+                notes=["official failed"],
+            )
+            google_trends.configured_rapidapi = lambda: False
+            google_trends.configured_dataforseo = lambda: False
+            payload = google_trends.collect("ai image generator")
+        finally:
+            google_trends.collect_official = original_collect_official
+            google_trends.configured_rapidapi = original_configured_rapidapi
+            google_trends.configured_dataforseo = original_configured_dataforseo
+
+        self.assertFalse(payload["available"])
+        self.assertEqual(payload["provider_attempts"][0]["provider"], "google-trends")
+        self.assertEqual(payload["provider_attempts"][1]["provider"], "rapidapi-google-trends")
+        self.assertFalse(payload["provider_attempts"][1]["configured"])
+        self.assertEqual(payload["provider_attempts"][2]["provider"], "dataforseo-google-trends")
+        self.assertFalse(payload["provider_attempts"][2]["configured"])
+
+    def test_collect_uses_rapidapi_when_official_google_is_unavailable(self) -> None:
+        original_collect_official = google_trends.collect_official
+        original_configured_rapidapi = google_trends.configured_rapidapi
+        original_collect_rapidapi = google_trends.collect_rapidapi
+        original_configured_dataforseo = google_trends.configured_dataforseo
+        try:
+            google_trends.collect_official = lambda *args, **kwargs: google_trends.build_payload(
+                query="ai image generator",
+                geo="US",
+                hl="en-US",
+                property_name="web",
+                provider="google-trends",
+                windows=[google_trends.build_empty_window("today 3-m", provider="google-trends", error="429")],
+                notes=["official failed"],
+            )
+            google_trends.configured_rapidapi = lambda: True
+            google_trends.collect_rapidapi = lambda *args, **kwargs: google_trends.build_payload(
+                query="ai image generator",
+                geo="US",
+                hl="en-US",
+                property_name="web",
+                provider="rapidapi-google-trends",
+                windows=[
+                    {
+                        "timeframe": "today 3-m",
+                        "label": "90d",
+                        "interest_over_time": {
+                            "rows": [{"value": 10}, {"value": 20}, {"value": 35}, {"value": 50}],
+                            "summary": google_trends.summarize_timeline([{"value": 10}, {"value": 20}, {"value": 35}, {"value": 50}]),
+                        },
+                        "interest_by_region": [],
+                        "related_queries": {"top": [], "rising": [{"query": "ai image generator free", "value": 80}]},
+                        "fetch_modes": {"PRIMARY": {"mode": "requests", "provider": "rapidapi", "error": None}},
+                        "available": True,
+                        "notes": ["rapidapi success"],
+                    }
+                ],
+                notes=["rapidapi success"],
+            )
+            google_trends.configured_dataforseo = lambda: False
+            payload = google_trends.collect("ai image generator")
+        finally:
+            google_trends.collect_official = original_collect_official
+            google_trends.configured_rapidapi = original_configured_rapidapi
+            google_trends.collect_rapidapi = original_collect_rapidapi
+            google_trends.configured_dataforseo = original_configured_dataforseo
+
+        self.assertTrue(payload["available"])
+        self.assertEqual(payload["source"]["provider"], "rapidapi-google-trends")
+        self.assertTrue(payload["provider_attempts"][0]["configured"])
+        self.assertFalse(payload["provider_attempts"][0]["available"])
+        self.assertTrue(payload["provider_attempts"][1]["configured"])
+        self.assertTrue(payload["provider_attempts"][1]["available"])
+
+    def test_normalize_dataforseo_window_maps_graph_regions_and_queries(self) -> None:
+        result = {
+            "items": [
+                {
+                    "type": "google_trends_graph",
+                    "data": [
+                        {"date_from": "2026-01-01", "date_to": "2026-01-07", "timestamp": 1, "values": [10], "missing_data": False},
+                        {"date_from": "2026-01-08", "date_to": "2026-01-14", "timestamp": 2, "values": [30], "missing_data": False},
+                        {"date_from": "2026-01-15", "date_to": "2026-01-21", "timestamp": 3, "values": [40], "missing_data": False},
+                        {"date_from": "2026-01-22", "date_to": "2026-01-28", "timestamp": 4, "values": [60], "missing_data": False},
+                    ],
+                },
+                {
+                    "type": "google_trends_map",
+                    "data": [{"geo_name": "United States", "geo_id": "US", "values": [90]}],
+                },
+                {
+                    "type": "google_trends_queries_list",
+                    "data": {
+                        "top": [{"query": "ai image generator free", "value": 100}],
+                        "rising": [{"query": "ai image generator app", "value": 250}],
+                    },
+                },
+            ]
+        }
+        window = google_trends.normalize_dataforseo_window(result, timeframe="today 3-m")
+        self.assertTrue(window["available"])
+        self.assertEqual(window["interest_over_time"]["summary"]["shape"], "rising")
+        self.assertEqual(window["interest_by_region"][0]["name"], "United States")
+        self.assertEqual(window["related_queries"]["rising"][0]["query"], "ai image generator app")
+
+
+class DemandWorkflowHeuristicsTests(unittest.TestCase):
+    def test_query_page_type_prefers_tool_for_generator_query(self) -> None:
+        self.assertEqual(run_demand_workflow.query_page_type("ai image generator"), "tool")
+
+    def test_query_page_type_detects_comparison_intent(self) -> None:
+        self.assertEqual(run_demand_workflow.query_page_type("ahrefs alternative"), "comparison")
+
+    def test_build_first_batch_pages_includes_comparison_page_blueprint(self) -> None:
+        pages = run_demand_workflow.build_first_batch_pages(
+            "ahrefs alternative",
+            "comparison",
+            ["ahrefs vs semrush"],
+        )
+
+        self.assertEqual(pages[0]["page_type"], "对比页")
+        self.assertEqual(pages[0]["hero_primary_cta"], "马上注册")
+        blueprint = pages[0]["page_blueprint"]
+        self.assertEqual(blueprint["recommended_h2"], "ahrefs vs 你的品牌：Comparison")
+        self.assertIn("价格", blueprint["comparison_table_dimensions"])
+        self.assertIn("适用场景", blueprint["comparison_table_dimensions"])
+        self.assertIn("为什么你是这个竞品的替代方案", blueprint["hero_questions_answered"])
+
+    def test_render_report_template_keeps_comparison_page_fields(self) -> None:
+        first_page = render_report.TEMPLATES["demand"]["first_batch_of_pages"][0]
+
+        self.assertIn("hero_primary_cta", first_page)
+        self.assertIn("page_blueprint", first_page)
+        self.assertIn("comparison_table_dimensions", first_page["page_blueprint"])
+        self.assertIn("recommended_h2", first_page["page_blueprint"])
+
+    def test_demand_raw_scores_reward_complete_evidence(self) -> None:
+        trends = {
+            "summary": {
+                "primary_shape": "rising",
+                "top_rising_queries": [{"query": "ai image generator free"}],
+            }
+        }
+        bundle = {
+            "summary": {"core_ready_tools": ["semrush", "similarweb"]},
+            "results": {
+                "semrush": {
+                    "data": {
+                        "top_pages": [
+                            {"url": "https://site.com/tool/1", "title": "t1", "top_keyword": "k1"},
+                            {"url": "https://site.com/tool/2", "title": "t2", "top_keyword": "k2"},
+                            {"url": "https://site.com/tool/3", "title": "t3", "top_keyword": "k3"},
+                        ],
+                        "top_organic_keywords": [
+                            {"keyword": "k1"},
+                            {"keyword": "k2"},
+                            {"keyword": "k3"},
+                            {"keyword": "k4"},
+                            {"keyword": "k5"},
+                        ],
+                    }
+                },
+                "similarweb": {
+                    "data": {
+                        "website_evidence": {
+                            "website_performance": {"available": True},
+                            "website_content": {
+                                "summary": {
+                                    "rows": [{"folder": "/game"}, {"folder": "/es"}, {"folder": "/new"}]
+                                }
+                            },
+                            "search_overview": {
+                                "top_non_brand_keywords": {
+                                    "rows": [{"keyword": "k1"}, {"keyword": "k2"}]
+                                },
+                                "paid_landing_pages": {
+                                    "rows": [{"url": "site.com/tool"}, {"url": "site.com/alt"}]
+                                },
+                            },
+                        }
+                    }
+                },
+            },
+        }
+        scores, _reasons, derived = run_demand_workflow.demand_raw_scores(
+            query="ai image generator",
+            page_type="tool",
+            trends=trends,
+            bundle=bundle,
+        )
+        self.assertGreaterEqual(scores["demand_reality"], 4)
+        self.assertGreaterEqual(scores["search_carry"], 5)
+        self.assertIn("Similarweb", derived["page_signal_summary"])
+        self.assertIn("付费落地页 2 条", derived["keyword_signal_summary"])
+
+    def test_attribution_raw_scores_read_similarweb_deep_rows(self) -> None:
+        trends = {"available": True, "summary": {"primary_shape": "rising"}}
+        bundle = {
+            "summary": {"core_ready_tools": ["semrush", "similarweb"]},
+            "results": {
+                "semrush": {
+                    "data": {
+                        "top_pages": [
+                            {"url": "https://site.com/tool/1", "title": "t1", "top_keyword": "k1"},
+                            {"url": "https://site.com/tool/2", "title": "t2", "top_keyword": "k2"},
+                            {"url": "https://site.com/tool/3", "title": "t3", "top_keyword": "k3"},
+                        ],
+                        "top_organic_keywords": [
+                            {"keyword": "k1"},
+                            {"keyword": "k2"},
+                        ],
+                    }
+                },
+                "similarweb": {
+                    "data": {
+                        "website_evidence": {
+                            "website_performance": {"available": True},
+                            "website_content": {
+                                "summary": {
+                                    "rows": [{"folder": "/game"}, {"folder": "/es"}, {"folder": "/new"}]
+                                }
+                            },
+                            "search_overview": {
+                                "top_non_brand_keywords": {"rows": [{"keyword": "free games"}]},
+                                "paid_landing_pages": {"rows": [{"url": "site.com/game/1"}]},
+                            },
+                        }
+                    }
+                },
+            },
+        }
+
+        scores, reasons, derived = run_demand_workflow.attribution_raw_scores(
+            query="crazygames.com",
+            trends=trends,
+            bundle=bundle,
+        )
+
+        self.assertGreaterEqual(scores["keyword_change_confidence"], 4)
+        self.assertGreaterEqual(scores["chain_closure"], 4)
+        self.assertIn("付费落地页 1 条", derived["keyword_signal_summary"])
+        self.assertTrue(any("Similarweb paid landing rows: 1" in reason for reason in reasons["chain_closure"]))
+
+
+class CaptureBundleQualityTests(unittest.TestCase):
+    def test_similarweb_quality_rewards_deep_page_level_evidence(self) -> None:
+        data = {
+            "website_evidence": {
+                "website_performance": {"available": True},
+                "website_content": {"summary": {"rows": [{"folder": "/game"}]}},
+                "search_overview": {
+                    "top_non_brand_keywords": {"rows": [{"keyword": "free games"}]},
+                    "paid_landing_pages": {"rows": [{"url": "site.com/game/1"}]},
+                },
+            }
+        }
+
+        quality = capture_bundle.assess_capture_quality("similarweb", data)
+
+        self.assertEqual(quality["status"], "ok")
+        self.assertTrue(quality["core_ready"])
+        self.assertEqual(quality["score"], 4)
+        self.assertIn("paid-landing-pages-ready", quality["reasons"])
+
+
+class GuidedFlowTests(unittest.TestCase):
+    def test_guided_flow_uses_web_cafe_style_entry(self) -> None:
+        workflow = {
+            "mode": "demand",
+            "input": {"query": "ai image generator"},
+            "decision": {"band": "ship_cluster", "total_score": 74},
+            "report": {"recommended_action": "ship_cluster", "first_batch_of_pages": [{}]},
+            "knowledge": {
+                "gefei": {"query": {"summary": "summary"}},
+                "chuhai": {"focus_methods": ["m1"], "method_highlights": ["m2", "m3"]},
+            },
+            "evidence": {
+                "trends": {"summary": {"primary_shape": "rising", "top_rising_queries": [{"query": "x"}]}},
+                "tool_capture": {"summary": {"core_ready_tools": ["semrush", "similarweb"]}},
+            },
+            "scores": {"raw_scores": {"clusterability": 4, "monetization": 4, "execution_fit": 3}},
+            "inferences": {"query_intent": "工具页", "page_type": "工具页"},
+            "derived": {
+                "page_signal_summary": "ps",
+                "top_page_examples": "tp",
+                "cluster_summary": "cs",
+                "monetization_summary": "ms",
+            },
+        }
+        guided = guided_flow.build_guided_flow(workflow)
+        self.assertEqual(guided["entry"]["primary_cta"], "跟我走完分阶段诊断")
+        self.assertEqual(guided["step_count"], 8)
+        self.assertEqual(guided["stages"][0]["title"], "先把问题框准")
+
+    def test_guided_flow_reads_gefei_summary_and_handles_degraded_trends(self) -> None:
+        workflow = {
+            "mode": "demand",
+            "input": {"query": "pdf to epub"},
+            "decision": {"band": "watch", "total_score": 48},
+            "report": {"recommended_action": "watch", "search_proof": "proof", "page_type_recommendation": "工具页"},
+            "knowledge": {
+                "gefei": {"summary": "不要只交关键词列表"},
+                "chuhai": {"focus_methods": ["landing pages"], "method_highlights": ["x", "y"]},
+            },
+            "evidence": {
+                "trends": {"available": False, "summary": {"primary_shape": "missing", "top_rising_queries": []}},
+                "tool_capture": {"summary": {"core_ready_tools": ["semrush"]}},
+            },
+            "scores": {"raw_scores": {"clusterability": 2, "monetization": 3, "execution_fit": 3}},
+            "inferences": {"query_intent": "工具页", "page_type": "工具页"},
+            "derived": {
+                "page_signal_summary": "ps",
+                "top_page_examples_text": "tp",
+                "cluster_summary": "cs",
+                "monetization_summary": "ms",
+            },
+        }
+        guided = guided_flow.build_guided_flow(workflow)
+        search_stage_facts = guided["stages"][2]["facts"]
+        self.assertTrue(any("Trends available: False" in fact for fact in search_stage_facts))
+        self.assertTrue(any("Semrush ready" in fact for fact in search_stage_facts))
+        demand_stage_facts = guided["stages"][1]["facts"]
+        self.assertTrue(any("不要只交关键词列表" in fact for fact in demand_stage_facts))
+        self.assertTrue(any("landing pages" in fact for fact in demand_stage_facts))
+
+
+class MethodAlignmentTests(unittest.TestCase):
+    def test_method_alignment_marks_all_three_layers(self) -> None:
+        knowledge = {
+            "gefei": {"summary": "不要只交关键词列表", "search_output": "similarweb"},
+            "chuhai": {"focus_methods": ["landing pages", "top pages"], "method_highlights": ["着落页", "主要页面"]},
+        }
+        bundle = {"summary": {"core_ready_tools": ["semrush", "similarweb"]}}
+        trends = {"available": False}
+        guided = {
+            "entry": {
+                "contradiction": "c",
+                "hidden_variable": "hv",
+                "primary_cta": "p",
+                "secondary_cta": "s",
+            },
+            "step_count": 8,
+            "direct_result": {"band": "watch"},
+        }
+        alignment = run_demand_workflow.build_method_alignment(
+            mode="demand",
+            query="pdf to epub",
+            page_type="工具页",
+            knowledge=knowledge,
+            trends=trends,
+            bundle=bundle,
+            guided=guided,
+        )
+        self.assertTrue(alignment["gefei"]["used"])
+        self.assertTrue(alignment["chuhai"]["used"])
+        self.assertTrue(alignment["web_cafe_simulator"]["used"])
+        self.assertTrue(alignment["gefei"]["signals_used"]["has_search_output"])
+        self.assertEqual(alignment["web_cafe_simulator"]["workflow_match"]["bounded_step_count"], 8)
+        self.assertEqual(alignment["web_cafe_simulator"]["simulator_mapping"]["page_type"], "工具页")
+
+
+class BuildWorkflowOrchestrationTests(unittest.TestCase):
+    def test_build_workflow_runs_full_one_click_chain(self) -> None:
+        original_knowledge_payload = run_demand_workflow.knowledge_payload
+        original_collect = google_trends.collect
+        original_capture_bundle_payload = run_demand_workflow.capture_bundle_payload
+        original_demand_raw_scores = run_demand_workflow.demand_raw_scores
+        original_score_payload = run_demand_workflow.score_payload
+        original_demand_report = run_demand_workflow.demand_report
+        original_build_guided_flow = guided_flow.build_guided_flow
+        original_build_method_alignment = run_demand_workflow.build_method_alignment
+
+        calls: list[str] = []
+        fake_knowledge = {
+            "gefei": {"summary": "不要只交关键词列表", "search_output": "similarweb"},
+            "chuhai": {"focus_methods": ["landing pages"], "method_highlights": ["着落页", "主要页面"]},
+        }
+        fake_trends = {
+            "available": True,
+            "summary": {
+                "primary_shape": "rising",
+                "top_rising_queries": [{"query": "pdf to epub free"}],
+            },
+        }
+        fake_bundle = {
+            "summary": {"core_ready_tools": ["semrush", "similarweb"]},
+            "results": {
+                "semrush": {"data": {"top_pages": [], "top_organic_keywords": []}},
+                "similarweb": {"data": {"website_evidence": {"website_performance": {"available": True}}}},
+            },
+        }
+        fake_raw_scores = {
+            "demand_reality": 4,
+            "search_carry": 4,
+            "trend_stability": 4,
+            "serp_entry": 3,
+            "page_intent_fit": 4,
+            "clusterability": 4,
+            "monetization": 3,
+            "execution_fit": 3,
+        }
+        fake_reasoning = {"demand_reality": ["community and page evidence available"]}
+        fake_derived = {
+            "cluster_summary": "这是一个可扩展的页面集群机会。",
+            "page_signal_summary": "Semrush / Similarweb 页级证据都已到位。",
+            "keyword_signal_summary": "关键词和落地页证据都已到位。",
+            "monetization_summary": "先做工具页更容易交付结果。",
+            "top_page_examples_text": "example page",
+        }
+        fake_score_result = {
+            "band": "ship_cluster",
+            "total_score": 74,
+            "all_hard_gates_passed": True,
+        }
+        fake_report = {
+            "recommended_action": "ship_cluster",
+            "first_batch_of_pages": [{"slug": "pdf-to-epub"}],
+        }
+        fake_guided = {
+            "entry": {
+                "contradiction": "这个词看起来能做，但到底是不是被搜索承接？",
+                "hidden_variable": "search carry",
+                "primary_cta": "跟我走完分阶段诊断",
+                "secondary_cta": "直接看最终建议",
+            },
+            "step_count": 8,
+            "direct_result": {"band": "ship_cluster"},
+        }
+        fake_alignment = {
+            "gefei": {"used": True},
+            "chuhai": {"used": True},
+            "web_cafe_simulator": {"used": True},
+        }
+
+        try:
+            def fake_knowledge_payload(mode: str, query: str) -> dict:
+                calls.append("knowledge")
+                self.assertEqual(mode, "demand")
+                self.assertEqual(query, "pdf to epub")
+                return fake_knowledge
+
+            def fake_collect(query: str, geo: str = "US", *args, **kwargs) -> dict:
+                calls.append("trends")
+                self.assertEqual(query, "pdf to epub")
+                self.assertEqual(geo, "US")
+                return fake_trends
+
+            def fake_capture_bundle_payload(**kwargs) -> dict:
+                calls.append("bundle")
+                self.assertEqual(kwargs["domain"], "pdftoepub.app")
+                return fake_bundle
+
+            def fake_demand_raw_scores(*, query: str, page_type: str, trends: dict, bundle: dict):
+                calls.append("raw_scores")
+                self.assertEqual(query, "pdf to epub")
+                self.assertEqual(page_type, "content")
+                self.assertIs(trends, fake_trends)
+                self.assertIs(bundle, fake_bundle)
+                return fake_raw_scores, fake_reasoning, fake_derived
+
+            def fake_score_payload(mode: str, raw_scores: dict) -> dict:
+                calls.append("scorecard")
+                self.assertEqual(mode, "demand")
+                self.assertEqual(raw_scores, fake_raw_scores)
+                return fake_score_result
+
+            def fake_demand_report(**kwargs) -> dict:
+                calls.append("report")
+                self.assertEqual(kwargs["query"], "pdf to epub")
+                self.assertEqual(kwargs["page_type"], "content")
+                self.assertEqual(kwargs["score_result"], fake_score_result)
+                self.assertIs(kwargs["trends"], fake_trends)
+                self.assertEqual(kwargs["derived"], fake_derived)
+                return fake_report
+
+            def fake_build_guided_flow(workflow: dict) -> dict:
+                calls.append("guided_flow")
+                self.assertEqual(workflow["knowledge"], fake_knowledge)
+                self.assertEqual(workflow["report"], fake_report)
+                self.assertEqual(workflow["scores"]["raw_scores"], fake_raw_scores)
+                return fake_guided
+
+            def fake_build_method_alignment(**kwargs) -> dict:
+                calls.append("method_alignment")
+                self.assertEqual(kwargs["knowledge"], fake_knowledge)
+                self.assertIs(kwargs["trends"], fake_trends)
+                self.assertIs(kwargs["bundle"], fake_bundle)
+                self.assertEqual(kwargs["guided"], fake_guided)
+                return fake_alignment
+
+            run_demand_workflow.knowledge_payload = fake_knowledge_payload
+            google_trends.collect = fake_collect
+            run_demand_workflow.capture_bundle_payload = fake_capture_bundle_payload
+            run_demand_workflow.demand_raw_scores = fake_demand_raw_scores
+            run_demand_workflow.score_payload = fake_score_payload
+            run_demand_workflow.demand_report = fake_demand_report
+            guided_flow.build_guided_flow = fake_build_guided_flow
+            run_demand_workflow.build_method_alignment = fake_build_method_alignment
+
+            workflow = run_demand_workflow.build_workflow(
+                mode="demand",
+                query="pdf to epub",
+                domain="pdftoepub.app",
+                geo="US",
+                username="u",
+                password="p",
+                max_node_rotations=2,
+            )
+        finally:
+            run_demand_workflow.knowledge_payload = original_knowledge_payload
+            google_trends.collect = original_collect
+            run_demand_workflow.capture_bundle_payload = original_capture_bundle_payload
+            run_demand_workflow.demand_raw_scores = original_demand_raw_scores
+            run_demand_workflow.score_payload = original_score_payload
+            run_demand_workflow.demand_report = original_demand_report
+            guided_flow.build_guided_flow = original_build_guided_flow
+            run_demand_workflow.build_method_alignment = original_build_method_alignment
+
+        self.assertEqual(
+            calls,
+            ["knowledge", "trends", "bundle", "raw_scores", "scorecard", "report", "guided_flow", "method_alignment"],
+        )
+        self.assertEqual(workflow["guided_flow"], fake_guided)
+        self.assertEqual(workflow["method_alignment"], fake_alignment)
+        self.assertEqual(workflow["decision"]["band"], "ship_cluster")
+        self.assertEqual(workflow["report"], fake_report)
+
+
+class TrendsDegradeTests(unittest.TestCase):
+    def test_degraded_trends_payload_marks_unavailable(self) -> None:
+        payload = run_demand_workflow.degraded_trends_payload("ai image generator", "US", "429")
+        self.assertFalse(payload["available"])
+        self.assertEqual(payload["summary"]["primary_shape"], "missing")
+        self.assertEqual(len(payload["windows"]), 4)

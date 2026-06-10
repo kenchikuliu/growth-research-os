@@ -79,3 +79,89 @@ Minimum fields:
 - `content_or_tool_structure`
 - `internal_links_to`
 - `monetization_path`
+
+Recommended fields when available:
+
+- `hero_primary_cta`
+- `page_blueprint`
+
+## `对比页 / Alternative / Versus` Blueprint
+
+Use this blueprint whenever the query intent is `alternative`, `vs`, `versus`, `compare`, `comparison`, `替代`, or `对比`.
+
+### Goal
+
+Do not write a soft overview. Write a conversion page that can rank for competitor-brand queries and answer the switch question directly.
+
+The page must answer three questions fast:
+
+1. 为什么你是这个竞品的替代方案
+2. 你比它更适合哪类用户
+3. 用户现在可以马上怎么开始用你
+
+### Required hero
+
+The first screen must:
+
+- explain the replacement reason in one sentence
+- show one explicit primary CTA
+- remove ambiguity about the next step
+
+Allowed CTA patterns:
+
+- `预约 Demo`
+- `免费试用`
+- `马上注册`
+- `打电话咨询`
+- `查看路线`
+
+Do not hide the CTA below the fold.
+Do not make the user infer the next step from navigation.
+
+### Recommended title and heading structure
+
+- H1: `{竞品名} Alternative：为什么很多用户选择你的品牌`
+- H2: `{竞品名} vs 你的品牌：Comparison`
+
+This heading pattern is intentionally search-friendly for Google, AI Overview, ChatGPT, and Perplexity style comparison retrieval.
+
+### Required sections
+
+1. 标题
+2. 首屏一句话替代理由 + 明确 CTA
+3. 适合谁
+4. 对比表
+
+### `适合谁` section rule
+
+Do not say “适合所有人”.
+State exactly who should switch:
+
+- team type
+- business type
+- workflow maturity
+- current bottleneck
+
+Good examples:
+
+- `如果你是 SaaS 团队，需要更快搭建可转化的 comparison 页和替代页，这个方案更适合你。`
+- `如果你是跨境卖家，已经知道竞品词有流量，但不会把 Similarweb 和 Semrush 的证据转成页面，这个方案更适合你。`
+
+### Required comparison table
+
+The page must include a comparison table.
+
+Recommended columns:
+
+- `价格`
+- `功能`
+- `上手难度`
+- `支持方式`
+- `适用场景`
+- `迁移成本`
+
+### SEO / AI search notes
+
+- Prefer `alternative / comparison / versus` wording when it matches intent.
+- Keep the comparison H2 and table explicit so structured extraction is easier.
+- If the competitor has weak SEO coverage, this page can sometimes outrank or intercept its brand query.

@@ -105,6 +105,15 @@ Run this sequence:
 7. Apply hard gates.
 8. Output the recommended action and first batch of pages.
 
+When the inferred page type is `对比页`, `alternative`, `vs`, or `comparison`, the first-batch page output must include:
+
+- one explicit hero CTA
+- a `page_blueprint` block
+- a comparison-table requirement
+- a concrete `适合谁` section rule
+
+Use [references/output-templates.md](references/output-templates.md) for the exact comparison-page structure.
+
 ## Evidence Rules
 
 Always separate:
@@ -258,6 +267,61 @@ python3 scripts/scorecard.py \
 
 If you need the weights, hard gates, and action thresholds, read [references/scorecards.md](references/scorecards.md).
 
+## One-Click Workflow
+
+If the user wants the whole stack in one run, use:
+
+```bash
+export THREEUE_USERNAME='...'
+export THREEUE_PASSWORD='...'
+
+python3 scripts/run_demand_workflow.py \
+  --mode demand \
+  --query "ai image generator" \
+  --domain janitorai.com \
+  --output /tmp/ai-image-generator-workflow.json
+```
+
+This runner:
+
+- calls `gefei` for judgment rules
+- calls `chuhai` for Similarweb / Semrush / Trends operating paths
+- captures Google Trends into structured JSON
+- runs 3ue-backed `capture_bundle.py` when a domain is available
+- computes the scorecard
+- emits a guided `web.cafe`-style staged flow in the final JSON
+
+## Google Trends Script
+
+When you need structured Trends evidence outside the full workflow:
+
+```bash
+python3 scripts/google_trends.py \
+  --query crazygames \
+  --geo US \
+  --output /tmp/crazygames-trends.json
+```
+
+Current behavior:
+
+- tries official Google Trends first
+- falls back to a same-origin browser request when Google returns HTTP 429 for widget data
+- can fall back again to configured `RapidAPI` or `DataForSEO` Google Trends providers when the official source is unavailable
+- keeps a normalized `30d / 90d / 12m / 5y` output shape with trend-shape summaries and related rising queries
+- records `provider_attempts` so downstream steps can see whether the data came from official Google, RapidAPI, DataForSEO, or a degraded path
+
+## Guided Flow Layer
+
+When the user wants a `web.cafe`-style staged diagnosis instead of a flat scorecard, the workflow JSON already includes `guided_flow`.
+
+You can also render it separately:
+
+```bash
+python3 scripts/guided_flow.py \
+  --input /tmp/ai-image-generator-workflow.json \
+  --output /tmp/ai-image-generator-guided.json
+```
+
 ## Output Format
 
 Prefer this structure.
@@ -282,6 +346,14 @@ Prefer this structure.
 6. `Recommended action`
 7. `First batch of pages`
 8. `Main uncertainty`
+
+If one of the first pages is a `对比页`, include at least:
+
+- `hero_primary_cta`
+- `page_blueprint.title_formula`
+- `page_blueprint.recommended_h2`
+- `page_blueprint.comparison_table_dimensions`
+- `page_blueprint.fit_section_rule`
 
 If useful, generate a starter JSON report with:
 

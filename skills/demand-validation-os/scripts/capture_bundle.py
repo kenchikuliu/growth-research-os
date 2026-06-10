@@ -44,8 +44,27 @@ def assess_capture_quality(tool: str, data: dict[str, Any] | None) -> dict[str, 
         }
     if tool == "similarweb":
         website_perf = data.get("website_evidence", {}).get("website_performance", {})
+        website_content = data.get("website_evidence", {}).get("website_content", {})
+        search_overview = data.get("website_evidence", {}).get("search_overview", {})
         home_signals = data.get("website_evidence", {}).get("home_signals", {})
         quick_search = data.get("website_evidence", {}).get("quick_search", {})
+        folder_rows = len((((website_content or {}).get("summary") or {}).get("rows") or []))
+        paid_landing_rows = len((((search_overview or {}).get("paid_landing_pages") or {}).get("rows") or []))
+        non_brand_keyword_rows = len((((search_overview or {}).get("top_non_brand_keywords") or {}).get("rows") or []))
+        if website_perf.get("available") and (folder_rows > 0 or paid_landing_rows > 0 or non_brand_keyword_rows > 0):
+            reasons = ["website-performance-ready"]
+            if folder_rows > 0:
+                reasons.append("website-content-ready")
+            if paid_landing_rows > 0:
+                reasons.append("paid-landing-pages-ready")
+            if non_brand_keyword_rows > 0:
+                reasons.append("non-brand-keywords-ready")
+            return {
+                "status": "ok",
+                "core_ready": True,
+                "score": 4,
+                "reasons": reasons,
+            }
         if website_perf.get("available"):
             return {
                 "status": "ok",

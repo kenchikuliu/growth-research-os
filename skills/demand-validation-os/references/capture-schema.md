@@ -128,7 +128,7 @@ Recommended item shapes:
 Operational notes:
 
 - `raw_artifacts.node_switches` and `raw_artifacts.usage_limit_events` are also emitted for Similarweb when a daily-limit wall is encountered during shell open or report navigation.
-- `网站表现` remains the stable structured baseline, but node rotation now happens before the script gives up and falls back to shell-only evidence.
+- `网站表现` remains the stable structured baseline, but the capture now also attempts deeper `网站内容` and `搜索概况` routes before falling back to shell-only evidence.
 
 ## `similarweb`
 
@@ -186,6 +186,68 @@ Collect when a target domain has a reachable report or state artifact.
         ]
       }
     },
+    "website_content": {
+      "available": true,
+      "route": "https://sim.3ue.com/#/digitalsuite/websiteanalysis/overview/website-content/*/999/3m?webSource=Total&key=crazygames.com&selectedTab=Folders",
+      "title": "网站内容",
+      "domain": "crazygames.com",
+      "summary": {
+        "total_folders": 247,
+        "selected_folder_count": 0,
+        "rows": [
+          {
+            "rank": 1,
+            "folder": "crazygames.com/game",
+            "share": "41.96%",
+            "month_over_month_change": "0.41 pp"
+          }
+        ]
+      }
+    },
+    "search_overview": {
+      "available": true,
+      "route": "https://sim.3ue.com/#/digitalsuite/websiteanalysis/search-overview/*/999/3m?webSource=Total&key=crazygames.com",
+      "title": "搜索概况",
+      "domain": "crazygames.com",
+      "summary": {
+        "overview": {
+          "traffic": "45.25M",
+          "traffic_yoy": "50.38%",
+          "share_of_total": "42.97%"
+        },
+        "brand_vs_non_brand": {
+          "branded": "61.06%",
+          "non_branded": "38.94%"
+        }
+      },
+      "top_non_brand_keywords": {
+        "rows": [
+          {
+            "keyword": "juegos",
+            "clicks": "1.2M",
+            "share": "3.22%",
+            "year_over_year_change": "52.66%",
+            "organic_share": "98.89%",
+            "paid_share": "1.11%"
+          }
+        ]
+      },
+      "paid_landing_pages": {
+        "rows": [
+          {
+            "url": "crazygames.com/game/geometry-dash-online",
+            "clicks": "18K",
+            "share": "3.94%",
+            "month_over_month_change": "0%",
+            "top_keyword": {
+              "keyword": "geometry dash",
+              "new_keywords": null,
+              "raw": "geometry dash"
+            }
+          }
+        ]
+      }
+    },
     "home_signals": {
       "route": "https://sim.3ue.com/#/activation/home",
       "title": "Activation Setup Page",
@@ -230,6 +292,7 @@ Recommended item shapes:
 
 - `Similarweb` under 3ue currently has a stronger session coupling than `Semrush`.
 - `网站表现` is the current stable Similarweb report baseline in this skill.
+- When the shell stays healthy, the capture now also emits structured `website_content` folder rows plus `search_overview` keyword and paid-landing-page rows.
 - `home_signals.priority_alerts` is the current fallback growth-signal layer when Similarweb shell routing is only partially ready.
 - If a deeper target-domain report capture is blocked, still emit `account_state` plus any route/state evidence gathered from favorites, recent items, settings, and autocomplete.
 - Do not silently fake missing report sections. Emit empty arrays and explain the gap in `raw_artifacts.notes`.
