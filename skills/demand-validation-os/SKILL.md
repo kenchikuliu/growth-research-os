@@ -41,6 +41,19 @@ Collect as many as available. Do not block if one tool is unavailable; state the
 - Semrush top pages / organic positions evidence when available
 - Google Trends evidence for the main terms when relevant
 
+When you need script-generated evidence from 3ue-backed accounts, use:
+
+- `scripts/capture_semrush.py`
+- `scripts/capture_similarweb.py`
+- `scripts/capture_bundle.py`
+
+These scripts now:
+
+- keep the full login flow inside the authenticated 3ue dashboard chain
+- emit structured JSON instead of raw screenshots only
+- auto-detect 3ue daily-limit pages
+- rotate to another configured 3ue node when the current node is exhausted
+
 ### For `新词 / 新需求验证`
 
 - keyword, phrase, or demand statement
@@ -122,6 +135,8 @@ Use each source for a narrow job:
   Look for already-validated clicks, especially landing pages and new-click changes.
 - `Semrush`
   Map pages back to terms, page clusters, competitive cut-ins, and supporting domain signals.
+
+For repeatable collection, prefer the capture scripts over ad-hoc browser clicking whenever you need data artifacts that another agent or step can consume.
 
 Read [references/data-sources.md](references/data-sources.md) before running if you need the exact responsibility split.
 

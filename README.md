@@ -42,14 +42,17 @@ export THREEUE_PASSWORD='...'
 
 python3 skills/demand-validation-os/scripts/capture_semrush.py \
   --query crazygames.com \
+  --max-node-rotations 2 \
   --output /tmp/semrush-crazygames.json
 
 python3 skills/demand-validation-os/scripts/capture_similarweb.py \
   --query crazygames.com \
+  --max-node-rotations 2 \
   --output /tmp/similarweb-crazygames.json
 
 python3 skills/demand-validation-os/scripts/capture_bundle.py \
   --query crazygames.com \
+  --max-node-rotations 2 \
   --output /tmp/crazygames-bundle.json
 ```
 
@@ -57,8 +60,9 @@ Current state:
 
 - `Semrush` capture is still the stronger structured source and emits overview, competitors, keywords, pages, trend, market, AI, and backlink sections.
 - `Semrush` now retries the overview route once if the first pass returns no RPC payloads.
+- `Semrush` and `Similarweb` now auto-detect 3ue daily-limit pages and can rotate to another configured node before retrying.
 - `Similarweb` now survives more 3ue shell half-load cases and can still emit activation-home priority-alert signals even when deeper routes are fragile.
-- `Similarweb` still has partial gaps for landing-pages style report automation; `网站表现` / website-performance is the stable captured baseline.
+- `Similarweb` still has partial gaps for landing-pages style report automation; `网站表现` / website-performance is the stable captured baseline, with structured JSON plus node-switch telemetry.
 - `capture_bundle.py` is the preferred way to run both tools together because it executes them serially and avoids cross-session interference from parallel browser-backed runs.
 
 ```

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from browser_capture import BrowseError, ThreeUEExecutor, iso_utc_now, load_network_entries
+from browser_capture import BrowseError, ThreeUEExecutor, extract_usage_limit_state, iso_utc_now, load_network_entries
 
 
 WEBSITE_PERFORMANCE_ROUTE_FRAGMENT = "/websiteanalysis/overview/website-performance/"
@@ -725,65 +725,166 @@ def navigate_to_website_performance(browser: Any, query: str) -> tuple[bool, str
         return False, "unresolved"
 
 
-def collect(query: str, username: str, password: str, session: str, keep_session: bool = False) -> dict[str, Any]:
+def capture_usage_limit_event(browser: Any, stage: str, node_index: int | None) -> dict[str, Any] | None:
+    usage_limit = extract_usage_limit_state(browser, timeout=20)
+    if not usage_limit:
+        return None
+    return {
+        **usage_limit,
+        "tool": "similarweb",
+        "stage": stage,
+        "node_index": node_index,
+    }
+
+
+def collect(
+    query: str,
+    username: str,
+    password: str,
+    session: str,
+    keep_session: bool = False,
+    max_node_rotations: int = 2,
+) -> dict[str, Any]:
     executor = ThreeUEExecutor(username=username, password=password, session=session)
     try:
         executor.reset_session()
         login = executor.login()
         executor.browser.network_on()
         network_dir = executor.browser.network_clear()
-        open_result = executor.open_tool("similarweb")
+        executor.ensure_home()
+        executor.browser.wait_timeout(2)
 
+        node_switches: list[dict[str, Any]] = []
+        usage_limit_events: list[dict[str, Any]] = []
         shell_notes: list[str] = []
-        try:
-            shell_state = wait_for_similarweb_shell_ready(executor.browser, timeout=75)
-        except BrowseError as exc:
-            shell_state = {
-                "href": executor.browser.current_url(),
-                "title": executor.browser.current_title(),
-                "fallback": True,
-            }
-            shell_notes.append(f"Similarweb shell readiness fell back to url/title-only state: {exc}")
-        shell_url = str(shell_state.get("href", executor.browser.current_url()))
-        tool_title = str(shell_state.get("title", executor.browser.current_title()))
-        home_signals = extract_home_signals(executor.browser)
-
-        quick_search: dict[str, Any] = {"ok": False, "reason": "not-attempted"}
-        modal_state: dict[str, Any] = {"modal_open": False, "websites": [], "keywords": []}
-        report_suggestions: list[dict[str, Any]] = []
         quick_search_notes: list[str] = []
+        open_result: dict[str, Any] = {}
+        shell_url = ""
+        tool_title = ""
+        home_signals: dict[str, Any] = {"route": "", "title": "", "priority_alerts": []}
         try:
-            executor.browser.press("Ctrl+K")
-            executor.browser.wait_timeout(1.5)
-            fill_quick_search(executor.browser, query)
-            executor.browser.wait_timeout(3)
-            quick_search, modal_state, report_suggestions = extract_quick_search_state(executor.browser)
-        except BrowseError as exc:
-            quick_search_notes.append(f"Quick search extraction failed in this session: {exc}")
+            quick_search: dict[str, Any] = {"ok": False, "reason": "not-attempted"}
+            modal_state: dict[str, Any] = {"modal_open": False, "websites": [], "keywords": []}
+            report_suggestions: list[dict[str, Any]] = []
+            clicked_candidate = False
+            route_navigation_used = "not-attempted"
+            report_snapshot: dict[str, Any] = {}
 
-        clicked_candidate = False
-        report_navigation_ok = False
-        route_navigation_used = "not-attempted"
-        try:
-            report_navigation_ok, route_navigation_used = navigate_to_website_performance(executor.browser, query)
-            if not report_navigation_ok:
-                clicked_candidate = click_exact_website_candidate(executor.browser, query)
-                route_navigation_used = "quick_search_candidate_click" if clicked_candidate else route_navigation_used
-        except BrowseError as exc:
-            route_navigation_used = "navigation-error"
-            quick_search_notes.append(f"Website-performance navigation failed in this session: {exc}")
-
-        report_snapshot: dict[str, Any] = {}
-        if report_navigation_ok or clicked_candidate:
-            try:
-                wait_for_website_performance_ready(executor.browser, timeout=60)
+            for node_round in range(max_node_rotations + 1):
+                if node_round > 0:
+                    executor.ensure_home()
+                    executor.browser.wait_timeout(2)
+                network_dir = executor.browser.network_clear()
+                open_result = executor.open_tool("similarweb")
                 executor.browser.wait_timeout(3)
-                report_snapshot = extract_report_snapshot(executor.browser)
-            except BrowseError:
-                report_snapshot = {}
+                current_node_index = executor.get_current_tool_node_index("similarweb")
 
-        final_url = executor.browser.try_current_url() or report_snapshot.get("url") or shell_url
-        final_title = executor.browser.try_current_title() or report_snapshot.get("title") or tool_title
+                usage_limit = capture_usage_limit_event(executor.browser, "tool_open", current_node_index)
+                if usage_limit:
+                    usage_limit_events.append({**usage_limit, "rotation_round": node_round})
+                    if node_round >= max_node_rotations:
+                        break
+                    tried_indices = {
+                        item["selected"]["index"] for item in node_switches if isinstance(item.get("selected"), dict)
+                    }
+                    node_switches.append(executor.rotate_tool_node("similarweb", tried_indices=tried_indices))
+                    continue
+
+                try:
+                    shell_state = wait_for_similarweb_shell_ready(executor.browser, timeout=75)
+                except BrowseError as exc:
+                    shell_state = {
+                        "href": executor.browser.current_url(),
+                        "title": executor.browser.current_title(),
+                        "fallback": True,
+                    }
+                    shell_notes.append(f"Similarweb shell readiness fell back to url/title-only state: {exc}")
+                shell_url = str(shell_state.get("href", executor.browser.current_url()))
+                tool_title = str(shell_state.get("title", executor.browser.current_title()))
+
+                usage_limit = capture_usage_limit_event(executor.browser, "shell_ready", current_node_index)
+                if usage_limit:
+                    usage_limit_events.append({**usage_limit, "rotation_round": node_round})
+                    if node_round >= max_node_rotations:
+                        break
+                    tried_indices = {
+                        item["selected"]["index"] for item in node_switches if isinstance(item.get("selected"), dict)
+                    }
+                    node_switches.append(executor.rotate_tool_node("similarweb", tried_indices=tried_indices))
+                    continue
+
+                home_signals = extract_home_signals(executor.browser)
+                usage_limit = capture_usage_limit_event(executor.browser, "home_signals", current_node_index)
+                if usage_limit:
+                    usage_limit_events.append({**usage_limit, "rotation_round": node_round})
+                    if node_round >= max_node_rotations:
+                        break
+                    tried_indices = {
+                        item["selected"]["index"] for item in node_switches if isinstance(item.get("selected"), dict)
+                    }
+                    node_switches.append(executor.rotate_tool_node("similarweb", tried_indices=tried_indices))
+                    continue
+
+                quick_search = {"ok": False, "reason": "not-attempted"}
+                modal_state = {"modal_open": False, "websites": [], "keywords": []}
+                report_suggestions = []
+                try:
+                    executor.browser.press("Ctrl+K")
+                    executor.browser.wait_timeout(1.5)
+                    fill_quick_search(executor.browser, query)
+                    executor.browser.wait_timeout(3)
+                    quick_search, modal_state, report_suggestions = extract_quick_search_state(executor.browser)
+                except BrowseError as exc:
+                    quick_search_notes.append(f"Quick search extraction failed in this session: {exc}")
+
+                clicked_candidate = False
+                report_navigation_ok = False
+                route_navigation_used = "not-attempted"
+                try:
+                    report_navigation_ok, route_navigation_used = navigate_to_website_performance(executor.browser, query)
+                    if not report_navigation_ok:
+                        clicked_candidate = click_exact_website_candidate(executor.browser, query)
+                        route_navigation_used = "quick_search_candidate_click" if clicked_candidate else route_navigation_used
+                except BrowseError as exc:
+                    route_navigation_used = "navigation-error"
+                    quick_search_notes.append(f"Website-performance navigation failed in this session: {exc}")
+
+                usage_limit = capture_usage_limit_event(executor.browser, "report_navigation", current_node_index)
+                if usage_limit:
+                    usage_limit_events.append({**usage_limit, "rotation_round": node_round})
+                    if node_round >= max_node_rotations:
+                        break
+                    tried_indices = {
+                        item["selected"]["index"] for item in node_switches if isinstance(item.get("selected"), dict)
+                    }
+                    node_switches.append(executor.rotate_tool_node("similarweb", tried_indices=tried_indices))
+                    continue
+
+                report_snapshot = {}
+                if report_navigation_ok or clicked_candidate:
+                    try:
+                        wait_for_website_performance_ready(executor.browser, timeout=60)
+                        executor.browser.wait_timeout(3)
+                        report_snapshot = extract_report_snapshot(executor.browser)
+                    except BrowseError:
+                        report_snapshot = {}
+
+                usage_limit = capture_usage_limit_event(executor.browser, "report_ready", current_node_index)
+                if usage_limit:
+                    usage_limit_events.append({**usage_limit, "rotation_round": node_round})
+                    if node_round >= max_node_rotations:
+                        break
+                    tried_indices = {
+                        item["selected"]["index"] for item in node_switches if isinstance(item.get("selected"), dict)
+                    }
+                    node_switches.append(executor.rotate_tool_node("similarweb", tried_indices=tried_indices))
+                    continue
+
+                break
+        finally:
+            final_url = executor.browser.try_current_url() or report_snapshot.get("url") or shell_url
+            final_title = executor.browser.try_current_title() or report_snapshot.get("title") or tool_title
+
         entries = load_network_entries(network_dir)
 
         identities = first_non_null(
@@ -862,6 +963,8 @@ def collect(query: str, username: str, password: str, session: str, keep_session
             notes.append("Quick-search website candidates and report suggestions were captured from the real Similarweb shell.")
         if website_performance.get("available"):
             notes.append("Website-performance report metrics were extracted from DOM blocks after entering the 3ue-backed Similarweb shell.")
+        if node_switches:
+            notes.append("Daily usage limit was detected; Similarweb node was rotated automatically and the shell/report route was retried.")
         if route_navigation_used == "hash_route_assign":
             notes.append("Report navigation used an authenticated hash-route jump inside the already-open 3ue Similarweb shell.")
         elif route_navigation_used == "direct_route_open_after_entry":
@@ -899,6 +1002,8 @@ def collect(query: str, username: str, password: str, session: str, keep_session
                 "open_result": open_result,
                 "shell_url": shell_url,
                 "final_title": final_title,
+                "node_switches": node_switches,
+                "usage_limit_events": usage_limit_events,
                 "notes": notes,
             },
             "account_state": {
@@ -944,12 +1049,20 @@ def main() -> int:
     parser.add_argument("--session", default="dvos-sim")
     parser.add_argument("--output", help="Write JSON to a file")
     parser.add_argument("--keep-session", action="store_true", help="Keep the browse session open after capture")
+    parser.add_argument("--max-node-rotations", type=int, default=2, help="Rotate to a different 3ue node when daily usage limit is detected")
     args = parser.parse_args()
 
     if not args.username or not args.password:
         raise SystemExit("Missing 3ue credentials. Set THREEUE_USERNAME and THREEUE_PASSWORD or pass --username/--password.")
 
-    data = collect(args.query, args.username, args.password, args.session, keep_session=args.keep_session)
+    data = collect(
+        args.query,
+        args.username,
+        args.password,
+        args.session,
+        keep_session=args.keep_session,
+        max_node_rotations=args.max_node_rotations,
+    )
     text = json.dumps(data, ensure_ascii=False, indent=2)
     if args.output:
         Path(args.output).write_text(text)

@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from browser_capture import ThreeUEExecutor, iso_utc_now, load_network_entries
+from browser_capture import ThreeUEExecutor, extract_usage_limit_state, iso_utc_now, load_network_entries
 
 
 def find_first(entries: list[dict[str, Any]], needle: str) -> Any:
@@ -293,33 +293,72 @@ def build_notes(classified: dict[str, Any]) -> list[str]:
 
 
 def open_semrush_overview(
-    executor: Any, query: str, network_dir: str
-) -> tuple[str, str, str, list[dict[str, Any]], list[dict[str, Any]], int]:
+    executor: Any, query: str, network_dir: str, max_node_rotations: int = 2
+) -> tuple[str, str, str, list[dict[str, Any]], list[dict[str, Any]], int, list[dict[str, Any]], list[dict[str, Any]]]:
     route = f"https://sem.3ue.com/analytics/overview/?q={query}&searchType=domain"
     page_url = ""
     page_title = ""
     entries: list[dict[str, Any]] = []
     rpc_results: list[dict[str, Any]] = []
     attempts_used = 0
+    node_switches: list[dict[str, Any]] = []
+    usage_limit_events: list[dict[str, Any]] = []
 
-    for attempt in range(1, 3):
-        attempts_used = attempt
-        if attempt > 1:
-            executor.ensure_home()
-            executor.browser.wait_timeout(2)
-            network_dir = executor.browser.network_clear()
-        executor.browser.open(route)
-        executor.browser.wait_timeout(12)
-        page_url = executor.browser.try_current_url() or route
-        page_title = executor.browser.try_current_title()
-        entries = load_network_entries(network_dir)
-        rpc_results = flatten_rpc_results(entries)
-        if rpc_results:
+    for node_round in range(max_node_rotations + 1):
+        usage_limit: dict[str, Any] | None = None
+        for attempt in range(1, 3):
+            attempts_used += 1
+            if attempts_used > 1:
+                executor.ensure_home()
+                executor.browser.wait_timeout(2)
+                network_dir = executor.browser.network_clear()
+            executor.browser.open(route)
+            executor.browser.wait_timeout(12)
+            page_url = executor.browser.try_current_url() or route
+            page_title = executor.browser.try_current_title()
+            usage_limit = extract_usage_limit_state(executor.browser, timeout=20)
+            if usage_limit:
+                usage_limit_events.append(
+                    {
+                        **usage_limit,
+                        "tool": "semrush",
+                        "node_index": executor.get_current_tool_node_index("semrush"),
+                        "attempt": attempts_used,
+                    }
+                )
+                break
+            entries = load_network_entries(network_dir)
+            rpc_results = flatten_rpc_results(entries)
+            if rpc_results:
+                return (
+                    page_url,
+                    page_title,
+                    network_dir,
+                    entries,
+                    rpc_results,
+                    attempts_used,
+                    node_switches,
+                    usage_limit_events,
+                )
+        if not usage_limit:
             break
-    return page_url, page_title, network_dir, entries, rpc_results, attempts_used
+        if node_round >= max_node_rotations:
+            break
+        tried_indices = {item["selected"]["index"] for item in node_switches if item.get("selected")}
+        switch = executor.rotate_tool_node("semrush", tried_indices=tried_indices)
+        node_switches.append(switch)
+        network_dir = executor.browser.network_clear()
+    return page_url, page_title, network_dir, entries, rpc_results, attempts_used, node_switches, usage_limit_events
 
 
-def collect(query: str, username: str, password: str, session: str, keep_session: bool = False) -> dict[str, Any]:
+def collect(
+    query: str,
+    username: str,
+    password: str,
+    session: str,
+    keep_session: bool = False,
+    max_node_rotations: int = 2,
+) -> dict[str, Any]:
     executor = ThreeUEExecutor(username=username, password=password, session=session)
     try:
         executor.reset_session()
@@ -329,8 +368,8 @@ def collect(query: str, username: str, password: str, session: str, keep_session
         executor.ensure_home()
         executor.browser.wait_timeout(2)
 
-        page_url, page_title, network_dir, entries, rpc_results, attempts_used = open_semrush_overview(
-            executor, query, network_dir
+        page_url, page_title, network_dir, entries, rpc_results, attempts_used, node_switches, usage_limit_events = open_semrush_overview(
+            executor, query, network_dir, max_node_rotations=max_node_rotations
         )
         subscription_context = executor.get_subscription_context()
         classified = classify_rpc_results(rpc_results)
@@ -370,9 +409,12 @@ def collect(query: str, username: str, password: str, session: str, keep_session
             "raw_artifacts": {
                 "network_dir": network_dir,
                 "overview_attempts": attempts_used,
+                "node_switches": node_switches,
+                "usage_limit_events": usage_limit_events,
                 "rpc_result_count": len(rpc_results),
                 "notes": build_notes(classified)
                 + (["Semrush overview route was retried because the first pass returned no RPC payloads."] if attempts_used > 1 else [])
+                + (["Daily usage limit was detected; Semrush node was rotated automatically and the route was retried."] if node_switches else [])
                 + (["Browser session was closed automatically after capture."] if not keep_session else []),
             },
             "domain_overview": {
@@ -445,12 +487,20 @@ def main() -> int:
     parser.add_argument("--session", default="dvos-sem")
     parser.add_argument("--output", help="Write JSON to a file")
     parser.add_argument("--keep-session", action="store_true", help="Keep the browse session open after capture")
+    parser.add_argument("--max-node-rotations", type=int, default=2, help="Rotate to a different 3ue node when daily usage limit is detected")
     args = parser.parse_args()
 
     if not args.username or not args.password:
         raise SystemExit("Missing 3ue credentials. Set THREEUE_USERNAME and THREEUE_PASSWORD or pass --username/--password.")
 
-    data = collect(args.query, args.username, args.password, args.session, keep_session=args.keep_session)
+    data = collect(
+        args.query,
+        args.username,
+        args.password,
+        args.session,
+        keep_session=args.keep_session,
+        max_node_rotations=args.max_node_rotations,
+    )
     text = json.dumps(data, ensure_ascii=False, indent=2)
     if args.output:
         Path(args.output).write_text(text)

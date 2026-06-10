@@ -16,10 +16,49 @@ from typing import Any
 
 DEFAULT_DASHBOARD_URL = "https://dash.3ue.com/zh-Hans/#/login"
 DEFAULT_DASHBOARD_HOME_URL = "https://dash.3ue.com/zh-Hans/#/page/m/home"
+TOOL_HOSTS = {
+    "similarweb": "https://sim.3ue.com",
+    "semrush": "https://sem.3ue.com",
+}
+USAGE_LIMIT_PATTERNS = [
+    "daily usage limit reached",
+    "to continue, either purchase a package or wait until your limit resets",
+    "wait until your limit resets",
+    "purchase a package",
+]
 
 
 class BrowseError(RuntimeError):
     pass
+
+
+def normalize_whitespace(text: str) -> str:
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
+def detect_usage_limit_text(text: str | None) -> dict[str, Any] | None:
+    normalized = normalize_whitespace(text or "")
+    lowered = normalized.lower()
+    matched = [pattern for pattern in USAGE_LIMIT_PATTERNS if pattern in lowered]
+    if not matched:
+        return None
+    return {
+        "matched_patterns": matched,
+        "excerpt": normalized[:1000],
+    }
+
+
+def extract_usage_limit_state(browser: "BrowseClient", timeout: int = 20) -> dict[str, Any] | None:
+    body_text = browser.try_get_text("body", timeout=timeout)
+    detected = detect_usage_limit_text(body_text)
+    if not detected:
+        return None
+    return {
+        "url": browser.try_current_url(timeout=10),
+        "title": browser.try_current_title(timeout=10),
+        "body": body_text[:2000],
+        **detected,
+    }
 
 
 @dataclass
@@ -409,6 +448,133 @@ class ThreeUEExecutor:
     def _sync_get_json(self, url: str) -> Any:
         self.ensure_home()
         return self.browser.fetch_json(url, timeout=30)
+
+    def read_gmitm_config(self) -> dict[str, Any]:
+        result = self.browser.try_eval(
+            """
+            (() => {
+              const match = document.cookie.match(/(?:^|; )GMITM_config=([^;]+)/);
+              if (!match) return null;
+              try {
+                return JSON.parse(decodeURIComponent(match[1]));
+              } catch (error) {
+                return { _parse_error: String(error), raw: match[1] };
+              }
+            })()
+            """,
+            timeout=10,
+        )
+        return result if isinstance(result, dict) else {}
+
+    def write_gmitm_config(self, config: dict[str, Any]) -> dict[str, Any]:
+        payload = json.dumps(config, ensure_ascii=False, separators=(",", ":"))
+        result = self.browser.eval(
+            f"""
+            (() => {{
+              const value = encodeURIComponent({json.dumps(payload, ensure_ascii=False)});
+              document.cookie = `GMITM_config=${{value}}; path=/; domain=.3ue.com`;
+              return document.cookie;
+            }})()
+            """,
+            timeout=15,
+        )
+        return {"cookie": result, "config": config}
+
+    def get_tool_nodes(self, tool: str) -> list[dict[str, Any]]:
+        host = TOOL_HOSTS[tool]
+        data = self.browser.eval(
+            f"""
+            (() => {{
+              try {{
+                const xhr = new XMLHttpRequest();
+                xhr.open("GET", {json.dumps(host + "/mitmApi/nodes")}, false);
+                xhr.withCredentials = true;
+                xhr.send(null);
+                let body = null;
+                try {{
+                  body = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+                }} catch {{
+                  body = xhr.responseText || null;
+                }}
+                return {{ status: xhr.status, body }};
+              }} catch (error) {{
+                return {{ status: 0, error: String(error) }};
+              }}
+            }})()
+            """,
+            timeout=30,
+        )
+        body = data.get("body") if isinstance(data, dict) else None
+        if isinstance(body, dict) and isinstance(body.get("data"), list):
+            rows = []
+            for idx, item in enumerate(body["data"]):
+                rows.append(
+                    {
+                        "index": idx,
+                        "note": item.get("note"),
+                        "rate": item.get("rate"),
+                        "raw": item,
+                    }
+                )
+            return rows
+        return []
+
+    def get_current_tool_node_index(self, tool: str) -> int | None:
+        config = self.read_gmitm_config()
+        tool_config = config.get(tool)
+        if not isinstance(tool_config, dict):
+            return None
+        node_value = tool_config.get("node")
+        if node_value is None:
+            return None
+        try:
+            return int(node_value)
+        except (TypeError, ValueError):
+            return None
+
+    def set_tool_node_index(self, tool: str, node_index: int, clear_cache: bool = True) -> dict[str, Any]:
+        config = self.read_gmitm_config()
+        tool_config = config.get(tool)
+        if not isinstance(tool_config, dict):
+            tool_config = {}
+        tool_config["node"] = str(node_index)
+        config[tool] = tool_config
+        write_result = self.write_gmitm_config(config)
+        cache_result = None
+        if clear_cache:
+            cache_result = self.clear_tool_cache(tool)
+        return {
+            "tool": tool,
+            "node_index": node_index,
+            "write": write_result,
+            "cache": cache_result,
+        }
+
+    def clear_tool_cache(self, tool: str) -> Any:
+        host = TOOL_HOSTS[tool]
+        return self.browser.open(f"{host}/gmitm.clean.cache.html?ref=%2F", timeout=90)
+
+    def rotate_tool_node(self, tool: str, tried_indices: set[int] | None = None) -> dict[str, Any]:
+        nodes = self.get_tool_nodes(tool)
+        if not nodes:
+            raise BrowseError(f"No nodes available for tool {tool}")
+        current = self.get_current_tool_node_index(tool)
+        tried = set(tried_indices or set())
+        candidate = next((item for item in nodes if item["index"] not in tried and item["index"] != current), None)
+        if candidate is None:
+            candidate = next((item for item in nodes if item["index"] not in tried), None)
+        if candidate is None:
+            raise BrowseError(f"No untried nodes left for tool {tool}; current={current}, tried={sorted(tried)}")
+        switch = self.set_tool_node_index(tool, candidate["index"], clear_cache=True)
+        self.ensure_home()
+        self.browser.wait_timeout(2)
+        return {
+            "tool": tool,
+            "previous_index": current,
+            "selected": candidate,
+            "switch": switch,
+            "available_nodes": nodes,
+        }
 
     def get_subscription_context(self) -> dict[str, Any]:
         subscription = self._sync_get_json("/api/subscription/self")

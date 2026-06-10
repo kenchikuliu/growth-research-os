@@ -88,14 +88,29 @@ def run_capture_once(
     session: str,
     keep_session: bool,
     attempt: int,
+    max_node_rotations: int,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     started_at = iso_utc_now()
     start_monotonic = time.monotonic()
     try:
         if tool == "semrush":
-            data = capture_semrush.collect(query, username, password, session, keep_session=keep_session)
+            data = capture_semrush.collect(
+                query,
+                username,
+                password,
+                session,
+                keep_session=keep_session,
+                max_node_rotations=max_node_rotations,
+            )
         elif tool == "similarweb":
-            data = capture_similarweb.collect(query, username, password, session, keep_session=keep_session)
+            data = capture_similarweb.collect(
+                query,
+                username,
+                password,
+                session,
+                keep_session=keep_session,
+                max_node_rotations=max_node_rotations,
+            )
         else:
             raise ValueError(f"Unsupported tool: {tool}")
         quality = assess_capture_quality(tool, data)
@@ -160,6 +175,7 @@ def run_capture_with_retries(
     session_prefix: str,
     keep_session: bool,
     max_attempts: int,
+    max_node_rotations: int,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]], dict[str, Any]]:
     best: tuple[dict[str, Any] | None, dict[str, Any]] | None = None
     attempts: list[dict[str, Any]] = []
@@ -173,6 +189,7 @@ def run_capture_with_retries(
             session=session,
             keep_session=keep_session,
             attempt=attempt,
+            max_node_rotations=max_node_rotations,
         )
         data, meta = result
         attempts.append(meta)
@@ -204,6 +221,12 @@ def main() -> int:
         help="Tools to run, in order. Default: semrush similarweb",
     )
     parser.add_argument("--keep-session", action="store_true", help="Keep the final tool session(s) open after capture")
+    parser.add_argument(
+        "--max-node-rotations",
+        type=int,
+        default=2,
+        help="Rotate to a different 3ue node when daily usage limit is detected",
+    )
     parser.add_argument(
         "--continue-on-error",
         action="store_true",
@@ -238,6 +261,7 @@ def main() -> int:
             session_prefix=args.session_prefix,
             keep_session=args.keep_session,
             max_attempts=max_attempts,
+            max_node_rotations=args.max_node_rotations,
         )
         bundle["runs"].extend(attempts)
         bundle["results"][tool] = {

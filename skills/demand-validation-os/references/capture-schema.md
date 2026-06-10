@@ -27,10 +27,19 @@ Every capture JSON should include:
   },
   "raw_artifacts": {
     "network_dir": "",
+    "node_switches": [],
+    "usage_limit_events": [],
     "notes": []
   }
 }
 ```
+
+If a 3ue tool page shows a daily-limit wall such as `Daily usage limit reached`, the capture scripts should:
+
+- record the event in `raw_artifacts.usage_limit_events`
+- rotate to another configured node when available
+- record the selected replacement in `raw_artifacts.node_switches`
+- retry the capture route before returning partial output
 
 ## `semrush`
 
@@ -74,6 +83,7 @@ Minimum sections:
 Operational notes:
 
 - `raw_artifacts.overview_attempts` records whether the overview route had to be retried because the first pass returned no usable RPC payloads.
+- `raw_artifacts.node_switches` and `raw_artifacts.usage_limit_events` record 3ue node rotation telemetry when a daily-limit wall is detected.
 - Prefer running Semrush serially with Similarweb through `scripts/capture_bundle.py` instead of starting both browser-backed captures in parallel.
 
 Recommended item shapes:
@@ -114,6 +124,11 @@ Recommended item shapes:
   ]
 }
 ```
+
+Operational notes:
+
+- `raw_artifacts.node_switches` and `raw_artifacts.usage_limit_events` are also emitted for Similarweb when a daily-limit wall is encountered during shell open or report navigation.
+- `网站表现` remains the stable structured baseline, but node rotation now happens before the script gives up and falls back to shell-only evidence.
 
 ## `similarweb`
 
@@ -224,7 +239,7 @@ Recommended item shapes:
 When both tools are needed in one run, prefer:
 
 ```bash
-python3 scripts/capture_bundle.py --query crazygames.com --output /tmp/crazygames-bundle.json
+python3 scripts/capture_bundle.py --query crazygames.com --max-node-rotations 2 --output /tmp/crazygames-bundle.json
 ```
 
 The bundle format is:
