@@ -32,6 +32,27 @@ Output:
 - scorecard + hard gates
 - attribution or demand decision
 - first batch of pages when applicable
+- optional structured JSON capture from 3ue-backed Similarweb and Semrush sessions
+
+Capture scripts:
+
+```bash
+export THREEUE_USERNAME='...'
+export THREEUE_PASSWORD='...'
+
+python3 skills/demand-validation-os/scripts/capture_semrush.py \
+  --query crazygames.com \
+  --output /tmp/semrush-crazygames.json
+
+python3 skills/demand-validation-os/scripts/capture_similarweb.py \
+  --query crazygames.com \
+  --output /tmp/similarweb-crazygames.json
+```
+
+Current state:
+
+- `Semrush` capture is the stronger structured source and emits overview, competitors, keywords, pages, trend, market, AI, and backlink sections.
+- `Similarweb` capture now reliably opens through the 3ue dashboard card, captures identity/startup/autocomplete evidence, and records quick-search domain suggestions, but full target-domain report extraction is still more session-sensitive.
 
 ```
 /demand-validation-os

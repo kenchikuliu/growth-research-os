@@ -125,6 +125,78 @@ Use each source for a narrow job:
 
 Read [references/data-sources.md](references/data-sources.md) before running if you need the exact responsibility split.
 
+## Automated Capture
+
+This skill now includes script-level capture for the 3ue-backed Similarweb and Semrush accounts.
+
+Read [references/capture-schema.md](references/capture-schema.md) before using the capture scripts so you know what JSON is guaranteed and what is best-effort.
+
+### Shared Browser Executor
+
+`scripts/browser_capture.py` provides:
+
+- automated 3ue login with DOM injection instead of brittle typing
+- dashboard card opening for Similarweb and Semrush
+- network capture parsing
+- shared session helpers for `browse`
+
+Credentials are read from `THREEUE_USERNAME` and `THREEUE_PASSWORD`, or passed via `--username` / `--password`.
+
+### Semrush Capture
+
+Use when you need a structured domain evidence pack:
+
+```bash
+export THREEUE_USERNAME='...'
+export THREEUE_PASSWORD='...'
+python3 scripts/capture_semrush.py \
+  --query crazygames.com \
+  --output /tmp/semrush-crazygames.json
+```
+
+Current behavior:
+
+- logs into `dash.3ue.com`
+- opens an authenticated Semrush route
+- captures network payloads
+- extracts `dpa/rpc` responses into structured JSON
+- uses a dedicated browser session so Similarweb and Semrush captures do not pollute each other
+
+Primary sections:
+
+- `domain_overview`
+- `organic_competitors`
+- `top_organic_keywords`
+- `top_pages`
+- `top_topics`
+- `ai_overview`
+- `backlink_overview`
+
+### Similarweb Capture
+
+Use when you need a structured Similarweb evidence pack:
+
+```bash
+export THREEUE_USERNAME='...'
+export THREEUE_PASSWORD='...'
+python3 scripts/capture_similarweb.py \
+  --query crazygames.com \
+  --output /tmp/similarweb-crazygames.json
+```
+
+Current behavior:
+
+- logs into `dash.3ue.com`
+- opens Similarweb only through the 3ue card
+- captures account-state and target-domain suggestion evidence
+- extracts identity, startup settings, autocomplete suggestions, and quick-search report candidates
+- uses a dedicated browser session so Similarweb and Semrush captures do not pollute each other
+
+Current limitation:
+
+- full target-domain report capture is more session-sensitive than Semrush
+- if direct report navigation is not stable, the script still emits useful `account_state` and `website_evidence` instead of pretending a report was reached
+
 ## Scorecards
 
 Use `scripts/scorecard.py` whenever you already have sub-scores and need deterministic totals and thresholds.
@@ -183,5 +255,6 @@ The templates are in [references/output-templates.md](references/output-template
 Do not load everything by default.
 
 - Read [references/data-sources.md](references/data-sources.md) when you need tool-role boundaries.
+- Read [references/capture-schema.md](references/capture-schema.md) when you need the exact JSON fields and current capture guarantees.
 - Read [references/scorecards.md](references/scorecards.md) when you need weights, gates, or thresholds.
 - Read [references/output-templates.md](references/output-templates.md) when writing the final diagnosis.

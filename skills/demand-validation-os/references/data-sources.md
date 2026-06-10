@@ -78,6 +78,12 @@ Default path:
 
 Do not treat Similarweb as a pure keyword ideation tool. Its value here is page-level proof.
 
+Automation note:
+
+- under 3ue, Similarweb is more sensitive to session and route transitions than Semrush
+- prefer capture scripts to start from the 3ue dashboard card, not direct public Similarweb URLs
+- if full report routing fails, keep account-state evidence and route candidates instead of fabricating page-level proof
+
 ## Semrush
 
 Use for page-side and term-side decomposition.
@@ -97,3 +103,9 @@ Default path:
 4. Backlinks / Ref Domains
 
 Do not stop at total traffic. Top Pages is the minimum useful view.
+
+Automation note:
+
+- Semrush is currently the stronger structured source in this skill
+- `dpa/rpc` responses already provide stable machine-readable payloads for overview, competitors, keywords, topics, AI, and backlinks
+- prefer `scripts/capture_semrush.py` when you need repeatable JSON, not manual copy from the page
