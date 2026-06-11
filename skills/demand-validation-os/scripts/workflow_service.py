@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlparse
 
 import run_demand_workflow
 from browser_capture import iso_utc_now
+from workflow_scale import build_scale_output
 
 
 SERVICE_NAME = "demand-validation-os.workflow_service"
@@ -108,46 +109,6 @@ def build_workflow_kwargs(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_scale_output(workflow: dict[str, Any]) -> dict[str, Any]:
-    report = workflow.get("report") or {}
-    decision = workflow.get("decision") or {}
-    artifacts = (workflow.get("artifacts") or {}).get("page_artifacts") or {}
-    normalized = ((workflow.get("evidence") or {}).get("tool_capture") or {}).get("normalized") or {}
-    return {
-        "mode": workflow.get("mode"),
-        "query": (workflow.get("input") or {}).get("query"),
-        "domain": (workflow.get("input") or {}).get("domain"),
-        "decision": {
-            "band": decision.get("band"),
-            "recommended_action": decision.get("recommended_action"),
-            "total_score": decision.get("total_score"),
-            "all_hard_gates_passed": decision.get("all_hard_gates_passed"),
-        },
-        "direct_answer": {
-            "core_conclusion": report.get("core_conclusion"),
-            "recommended_action": report.get("recommended_action") or decision.get("recommended_action"),
-            "page_type_recommendation": report.get("page_type_recommendation"),
-            "main_growth_terms": report.get("main_growth_terms"),
-            "main_growth_pages": report.get("main_growth_pages"),
-        },
-        "page_plan": {
-            "first_batch_of_pages": report.get("first_batch_of_pages") or [],
-            "page_artifact_count": artifacts.get("page_count", 0),
-            "artifacts_available": bool(artifacts.get("available")),
-        },
-        "normalized_snapshot": {
-            "tools_ready": normalized.get("tools_ready") or [],
-            "coverage": normalized.get("coverage") or {},
-            "traffic_summary": normalized.get("traffic_summary") or {},
-            "top_page_count": len(normalized.get("top_pages") or []),
-            "top_keyword_count": len(normalized.get("top_keywords") or []),
-            "landing_page_count": len(normalized.get("landing_pages") or []),
-            "page_cluster_count": len(normalized.get("page_clusters") or []),
-        },
-        "artifacts": artifacts,
-    }
-
-
 class WorkflowServiceHandler(BaseHTTPRequestHandler):
     server_version = "WorkflowService/1.0"
     protocol_version = "HTTP/1.1"
@@ -203,7 +164,7 @@ class WorkflowServiceHandler(BaseHTTPRequestHandler):
             return
 
         request_id = payload.get("request_id") if isinstance(payload, dict) else None
-        if parsed.path not in {"/workflow", "/workflow/page-artifacts"}:
+        if parsed.path not in {"/workflow", "/workflow/page-artifacts", "/scale", "/scale/page-artifacts"}:
             status, error_payload = make_error(
                 status=HTTPStatus.NOT_FOUND,
                 code="not_found",
@@ -240,6 +201,16 @@ class WorkflowServiceHandler(BaseHTTPRequestHandler):
                 data = {
                     "workflow_summary": build_scale_output(workflow),
                     "page_artifacts": (workflow.get("artifacts") or {}).get("page_artifacts") or {},
+                }
+            elif parsed.path == "/scale/page-artifacts":
+                scale_output = build_scale_output(workflow)
+                data = {
+                    "scale_output": scale_output,
+                    "page_artifacts": scale_output.get("artifacts") or {},
+                }
+            elif parsed.path == "/scale":
+                data = {
+                    "scale_output": build_scale_output(workflow),
                 }
             else:
                 data = {

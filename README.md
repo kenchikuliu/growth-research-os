@@ -69,6 +69,14 @@ python3 skills/demand-validation-os/scripts/workflow_service.py \
   --host 127.0.0.1 \
   --port 8766
 
+python3 skills/demand-validation-os/scripts/run_scale.py \
+  --mode demand \
+  --query "ahrefs alternative" \
+  --domain ahrefs.com \
+  --brand-name "Your Brand" \
+  --brand-url "https://example.com" \
+  --primary-cta-url "https://example.com/signup"
+
 python3 skills/demand-validation-os/scripts/google_trends.py \
   --query crazygames \
   --geo US \
@@ -96,6 +104,8 @@ Current state:
 - `capture_service.py` keeps the same strict execution policy as the CLI: `single_device + single_browser + single_active_page + serial`, and rejects concurrent capture requests with HTTP `409`.
 - `run_demand_workflow.py` now accepts a full prebuilt `bundle_payload`, not just a file path, so later scale or service code can hand normalized capture data directly into the scoring and artifact layers.
 - `workflow_service.py` is the higher-level scale entrypoint. It returns final `新词验证 / 榜单归因` workflow output plus page-artifact JSON in one HTTP call.
+- `workflow_scale.py` now holds the reusable thin `scale_output` projection so both CLI and HTTP callers get the same compact result shape.
+- `run_scale.py` is the thin local CLI for one-off or batch jobs. It returns `scale_output` plus `page_artifacts`, and only includes full workflow JSON when explicitly requested.
 - `page_artifacts.py` now prefers the `normalized` capture layer when counting proof, landing-page evidence, and page-cluster evidence, so page JSON generation no longer depends on raw tool-specific shapes alone.
 - `google_trends.py` now tries official Google Trends first, then can fall back to configured RapidAPI or DataForSEO providers, while keeping a normalized `30d / 90d / 12m / 5y` output shape and recording `provider_attempts`.
 - `run_demand_workflow.py` is the one-click orchestrator that combines gefei, chuhai, Google Trends, Similarweb, Semrush, scorecard logic, and a staged guided-flow layer.
@@ -128,6 +138,16 @@ curl -s http://127.0.0.1:8766/workflow/page-artifacts \
     "brand_url": "https://example.com",
     "primary_cta_url": "https://example.com/signup",
     "request_id": "demo-workflow-1"
+  }'
+
+curl -s http://127.0.0.1:8766/scale \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "mode": "attribution",
+    "query": "crazygames.com",
+    "domain": "crazygames.com",
+    "username": "'"$THREEUE_USERNAME"'",
+    "password": "'"$THREEUE_PASSWORD"'"
   }'
 ```
 

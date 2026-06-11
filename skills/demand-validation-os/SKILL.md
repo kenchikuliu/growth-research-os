@@ -262,6 +262,14 @@ python3 scripts/capture_service.py \
 python3 scripts/workflow_service.py \
   --host 127.0.0.1 \
   --port 8766
+
+python3 scripts/run_scale.py \
+  --mode demand \
+  --query "ahrefs alternative" \
+  --domain ahrefs.com \
+  --brand-name "Your Brand" \
+  --brand-url "https://example.com" \
+  --primary-cta-url "https://example.com/signup"
 ```
 
 Current behavior:
@@ -284,6 +292,12 @@ Workflow service behavior:
 - returns both the final workflow decision and page-artifact JSON
 - can accept live 3ue credentials, `bundle_input`, or an in-memory `bundle_payload`
 - keeps one workflow request at a time so the capture layer stays serial
+
+Thin scale behavior:
+
+- `/scale` returns only the compact `scale_output`
+- `/scale/page-artifacts` returns `scale_output` plus `page_artifacts`
+- `scripts/run_scale.py` does the same locally, and also supports batch jobs via `--jobs-input`
 
 Example:
 
@@ -310,6 +324,19 @@ curl -s http://127.0.0.1:8766/workflow/page-artifacts \
     "brand_url": "https://example.com",
     "primary_cta_url": "https://example.com/signup",
     "request_id": "wf-1"
+  }'
+
+curl -s http://127.0.0.1:8766/scale/page-artifacts \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "mode": "demand",
+    "query": "ahrefs alternative",
+    "domain": "ahrefs.com",
+    "username": "'"$THREEUE_USERNAME"'",
+    "password": "'"$THREEUE_PASSWORD"'",
+    "brand_name": "Your Brand",
+    "brand_url": "https://example.com",
+    "primary_cta_url": "https://example.com/signup"
   }'
 ```
 

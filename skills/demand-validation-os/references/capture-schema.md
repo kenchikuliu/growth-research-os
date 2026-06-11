@@ -147,6 +147,8 @@ Routes:
 - `GET /health`
 - `POST /workflow`
 - `POST /workflow/page-artifacts`
+- `POST /scale`
+- `POST /scale/page-artifacts`
 
 Request body supports:
 
@@ -211,6 +213,73 @@ Example response shape for `POST /workflow/page-artifacts`:
   }
 }
 ```
+
+`POST /scale` returns the thinner compact layer only:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "scale_output": {
+      "mode": "demand",
+      "query": "ahrefs alternative",
+      "decision": {},
+      "direct_answer": {},
+      "page_plan": {},
+      "normalized_snapshot": {},
+      "artifacts": {}
+    }
+  }
+}
+```
+
+## Thin Scale CLI
+
+`scripts/run_scale.py` is the local CLI mirror of the thin scale HTTP layer.
+
+Single job:
+
+```bash
+python3 scripts/run_scale.py \
+  --mode demand \
+  --query "ahrefs alternative" \
+  --domain ahrefs.com \
+  --brand-name "Your Brand" \
+  --brand-url "https://example.com" \
+  --primary-cta-url "https://example.com/signup"
+```
+
+Batch jobs:
+
+```json
+{
+  "jobs": [
+    {
+      "mode": "demand",
+      "query": "ahrefs alternative",
+      "domain": "ahrefs.com"
+    },
+    {
+      "mode": "attribution",
+      "query": "crazygames.com",
+      "domain": "crazygames.com"
+    }
+  ]
+}
+```
+
+```bash
+python3 scripts/run_scale.py \
+  --jobs-input /tmp/scale-jobs.json \
+  --output /tmp/scale-results.json
+```
+
+Default CLI output:
+
+- `scale_output`
+- `page_artifacts`
+
+Only include the full workflow tree when `--include-workflow` is passed.
 
 ## Normalized Cross-Tool Schema
 
