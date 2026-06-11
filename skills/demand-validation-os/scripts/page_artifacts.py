@@ -166,6 +166,13 @@ def build_proof_points(workflow: dict[str, Any]) -> list[str]:
     gefei_summary = get_path(workflow, "knowledge", "gefei", "summary", default="")
     if gefei_summary:
         points.append(f"gefei 规则层摘要：{gefei_summary}")
+    kd_guidance = get_path(workflow, "evidence", "web_cafe_kd", "guidance", default="")
+    kd_score = get_path(workflow, "evidence", "web_cafe_kd", "kd_score", default=None)
+    if kd_guidance:
+        if kd_score is None:
+            points.append(f"web.cafe KD 提示：{kd_guidance}")
+        else:
+            points.append(f"web.cafe KD={kd_score}，提示：{kd_guidance}")
     return points[:6]
 
 

@@ -165,6 +165,8 @@ Request body supports:
 - `brand_url`
 - `primary_cta_url`
 - `primary_cta_label`
+- `kd_input`
+- `kd_score`
 - `request_id`
 - scale batch mode on `/scale` and `/scale/page-artifacts` also supports:
   - `jobs`
@@ -188,9 +190,13 @@ Example request:
   "brand_name": "Your Brand",
   "brand_url": "https://example.com",
   "primary_cta_url": "https://example.com/signup",
+  "kd_score": 65,
   "request_id": "wf-1"
 }
 ```
+
+`kd_score` and `kd_input` are the lightweight adapter fields for `https://seo.web.cafe/kd/`.
+Use them as a public directional difficulty hint, not as a replacement for Semrush / Similarweb page-level evidence.
 
 Example response shape for `POST /workflow/page-artifacts`:
 
@@ -557,6 +563,32 @@ Typical `playbook` responsibilities:
 - separate the next actions from the longer workflow reasoning
 - surface first-batch page titles, artifact slugs, reusable parts, and do-not-copy constraints
 - expose a stable `playbook_template` so downstream scale / skill / UI code can render a fixed execution scaffold per mode
+
+## web.cafe KD Layer
+
+`run_demand_workflow.py` can also carry:
+
+```json
+{
+  "evidence": {
+    "web_cafe_kd": {
+      "query": "ahrefs alternative",
+      "available": true,
+      "kd_score": 65,
+      "kd_bucket": "hard",
+      "guidance": "不建议直接正面争夺主词，优先做截流页、替代页或明显更窄的意图页面。"
+    }
+  }
+}
+```
+
+Use this layer for:
+
+- direct-vs-narrower page-cut decisions
+- deciding whether to prefer `alternative / comparison` pages
+- adding a public difficulty hint to playbooks and page artifacts
+
+Do not use this layer alone to claim a market is easy or hard. It is a directional signal that should be combined with page-level evidence from Similarweb / Semrush.
 
 ## Frontend Artifact Protocol
 

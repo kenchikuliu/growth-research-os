@@ -106,6 +106,8 @@ def build_workflow_kwargs(payload: dict[str, Any]) -> dict[str, Any]:
         "bundle_input": bundle_input,
         "bundle_payload": bundle_payload,
         "trends_input": payload.get("trends_input") or None,
+        "kd_input": payload.get("kd_input") or None,
+        "kd_score": payload.get("kd_score"),
     }
 
 

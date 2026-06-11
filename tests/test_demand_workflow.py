@@ -28,6 +28,7 @@ import page_artifacts
 import tabular_io
 import render_report
 import workflow_playbook
+import web_cafe_kd
 
 
 class GoogleTrendsSummaryTests(unittest.TestCase):
@@ -156,6 +157,21 @@ class GoogleTrendsSummaryTests(unittest.TestCase):
         self.assertEqual(window["interest_over_time"]["summary"]["shape"], "rising")
         self.assertEqual(window["interest_by_region"][0]["name"], "United States")
         self.assertEqual(window["related_queries"]["rising"][0]["query"], "ai image generator app")
+
+
+class WebCafeKdTests(unittest.TestCase):
+    def test_web_cafe_kd_classifies_difficulty_bucket(self) -> None:
+        self.assertEqual(web_cafe_kd.classify_kd_bucket(12), "easy")
+        self.assertEqual(web_cafe_kd.classify_kd_bucket(28), "possible")
+        self.assertEqual(web_cafe_kd.classify_kd_bucket(45), "moderate")
+        self.assertEqual(web_cafe_kd.classify_kd_bucket(62), "hard")
+        self.assertEqual(web_cafe_kd.classify_kd_bucket(80), "very_hard")
+
+    def test_web_cafe_kd_collect_builds_guidance_payload(self) -> None:
+        payload = web_cafe_kd.collect(query="ahrefs alternative", kd_score=63)
+        self.assertTrue(payload["available"])
+        self.assertEqual(payload["kd_bucket"], "hard")
+        self.assertIn("更适合", payload["guidance"])
 
 
 class DemandWorkflowHeuristicsTests(unittest.TestCase):
@@ -966,12 +982,13 @@ class BuildWorkflowOrchestrationTests(unittest.TestCase):
                 self.assertEqual(kwargs["domain"], "pdftoepub.app")
                 return fake_bundle
 
-            def fake_demand_raw_scores(*, query: str, page_type: str, trends: dict, bundle: dict):
+            def fake_demand_raw_scores(*, query: str, page_type: str, trends: dict, bundle: dict, kd_payload: dict | None = None):
                 calls.append("raw_scores")
                 self.assertEqual(query, "pdf to epub")
                 self.assertEqual(page_type, "content")
                 self.assertIs(trends, fake_trends)
                 self.assertIs(bundle, fake_bundle)
+                self.assertEqual(kd_payload["kd_bucket"], "unknown")
                 return fake_raw_scores, fake_reasoning, fake_derived
 
             def fake_score_payload(mode: str, raw_scores: dict) -> dict:
@@ -987,6 +1004,7 @@ class BuildWorkflowOrchestrationTests(unittest.TestCase):
                 self.assertEqual(kwargs["score_result"], fake_score_result)
                 self.assertIs(kwargs["trends"], fake_trends)
                 self.assertEqual(kwargs["derived"], fake_derived)
+                self.assertEqual(kwargs["kd_payload"]["kd_bucket"], "unknown")
                 return fake_report
 
             def fake_build_guided_flow(workflow: dict) -> dict:
@@ -1048,6 +1066,7 @@ class BuildWorkflowOrchestrationTests(unittest.TestCase):
         self.assertEqual(workflow["method_alignment"], fake_alignment)
         self.assertEqual(workflow["artifacts"]["page_artifacts"], fake_artifacts)
         self.assertEqual(workflow["playbook"]["decision"]["recommended_action"], "ship_cluster")
+        self.assertEqual(workflow["evidence"]["web_cafe_kd"]["kd_bucket"], "unknown")
         self.assertEqual(workflow["decision"]["band"], "ship_cluster")
         self.assertEqual(workflow["report"], fake_report)
 
@@ -1141,6 +1160,55 @@ class WorkflowNormalizedIntegrationTests(unittest.TestCase):
 
         self.assertEqual(workflow["evidence"]["tool_capture"]["normalized"]["tools_ready"], ["semrush", "similarweb"])
         self.assertTrue(workflow["artifacts"]["page_artifacts"]["available"])
+
+    def test_build_workflow_accepts_manual_kd_score(self) -> None:
+        original_knowledge_payload = run_demand_workflow.knowledge_payload
+        original_collect = google_trends.collect
+        try:
+            run_demand_workflow.knowledge_payload = lambda mode, query: {
+                "gefei": {"summary": "不要只交关键词列表", "search_output": "similarweb"},
+                "chuhai": {"focus_methods": ["landing pages"], "method_highlights": ["着落页", "主要页面"]},
+            }
+            google_trends.collect = lambda query, geo="US": {
+                "available": True,
+                "summary": {"primary_shape": "rising", "top_rising_queries": [{"query": "ahrefs alternative free"}]},
+            }
+            bundle = {
+                "request": {"query": {"type": "domain", "value": "ahrefs.com"}},
+                "results": {
+                    "semrush": {"data": {"top_pages": [], "top_organic_keywords": []}},
+                    "similarweb": {"data": {"website_evidence": {"website_performance": {"available": True}}}},
+                },
+                "summary": {"core_ready_tools": ["semrush", "similarweb"]},
+                "normalized": {
+                    "tools_ready": ["semrush", "similarweb"],
+                    "top_pages": [],
+                    "top_keywords": [],
+                    "landing_pages": [],
+                    "page_clusters": [],
+                    "traffic_summary": {},
+                    "tool_signals": {"similarweb": {"website_performance_ready": True}, "semrush": {}},
+                },
+            }
+            workflow = run_demand_workflow.build_workflow(
+                mode="demand",
+                query="ahrefs alternative",
+                domain="ahrefs.com",
+                geo="US",
+                username="u",
+                password="p",
+                max_node_rotations=2,
+                bundle_payload=bundle,
+                kd_score=65,
+            )
+        finally:
+            run_demand_workflow.knowledge_payload = original_knowledge_payload
+            google_trends.collect = original_collect
+
+        self.assertEqual(workflow["evidence"]["web_cafe_kd"]["kd_bucket"], "hard")
+        self.assertIn("web.cafe KD=65", workflow["derived"]["kd_summary"])
+        proof_points = workflow["artifacts"]["page_artifacts"]["publishable_pages"][0]["hero"]["supporting_proof"]
+        self.assertTrue(any("web.cafe KD" in point for point in proof_points))
 
 
 class NormalizedArtifactTests(unittest.TestCase):

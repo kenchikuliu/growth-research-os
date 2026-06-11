@@ -42,6 +42,7 @@ def demand_template(workflow: dict[str, Any]) -> dict[str, Any]:
     report = workflow.get("report") or {}
     derived = workflow.get("derived") or {}
     first_pages = report.get("first_batch_of_pages") or []
+    kd_guidance = get_path(workflow, "evidence", "web_cafe_kd", "guidance", default="")
     return {
         "template_type": "new_demand_launch_play",
         "goal": "把一个新词 / 新需求从验证推进到首批页面执行",
@@ -89,6 +90,7 @@ def demand_template(workflow: dict[str, Any]) -> dict[str, Any]:
             "Similarweb landing pages or page-level evidence",
             "Semrush top pages / top keywords",
             "Google Trends shape",
+            "web.cafe KD guidance",
             "gefei + chuhai judgment rules",
         ],
         "handoff_outputs": [
@@ -97,6 +99,7 @@ def demand_template(workflow: dict[str, Any]) -> dict[str, Any]:
             "page_artifacts",
             "publishable_pages",
         ],
+        "difficulty_hint": kd_guidance or "当前没有稳定 KD 提示。",
     }
 
 
@@ -247,6 +250,7 @@ def build_demand_playbook(workflow: dict[str, Any]) -> dict[str, Any]:
             derived.get("keyword_signal_summary") or "",
             derived.get("cluster_summary") or "",
             derived.get("monetization_summary") or "",
+            derived.get("kd_summary") or "",
         ],
         "next_actions": [
             "先做首批页面里意图最清晰的一页。",
@@ -304,4 +308,3 @@ def build_playbook(workflow: dict[str, Any]) -> dict[str, Any]:
     if mode == "attribution":
         return build_attribution_playbook(workflow)
     return build_demand_playbook(workflow)
-

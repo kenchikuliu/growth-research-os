@@ -17,6 +17,7 @@ import google_trends
 import guided_flow
 import page_artifacts
 import scorecard as scorecard_module
+import web_cafe_kd
 import workflow_playbook
 from browser_capture import iso_utc_now
 
@@ -506,6 +507,7 @@ def demand_raw_scores(
     page_type: str,
     trends: dict[str, Any],
     bundle: dict[str, Any],
+    kd_payload: dict[str, Any] | None = None,
 ) -> tuple[dict[str, int], dict[str, list[str]], dict[str, Any]]:
     reasons: dict[str, list[str]] = {}
     top_pages = read_top_pages(bundle)
@@ -518,6 +520,9 @@ def demand_raw_scores(
     rising_terms = top_rising_terms(trends)
     non_home_pages = count_non_home_pages(top_pages)
     trends_available = bool(trends.get("available"))
+    kd_score = get_path(kd_payload or {}, "kd_score", default=None)
+    kd_guidance = get_path(kd_payload or {}, "guidance", default="")
+    kd_bucket = get_path(kd_payload or {}, "kd_bucket", default="unknown")
 
     demand_reality = 2
     if trends_available and rising_terms:
@@ -572,10 +577,15 @@ def demand_raw_scores(
         serp_entry += 1
     if page_type in {"tool", "comparison"}:
         serp_entry += 1
+    if kd_bucket in {"easy", "possible"}:
+        serp_entry += 1
+    if kd_bucket in {"hard", "very_hard"}:
+        serp_entry -= 1
     serp_entry = min(5, serp_entry)
     reasons["serp_entry"] = [
         f"Non-home top pages: {non_home_pages}",
         f"Inferred page type: {page_type}",
+        f"KD bucket: {kd_bucket}",
     ]
 
     page_intent_fit = 4 if page_type in {"tool", "comparison", "template", "content"} else 2
@@ -593,11 +603,14 @@ def demand_raw_scores(
         clusterability += 1
     if trends_available and rising_terms:
         clusterability += 1
+    if kd_bucket in {"hard", "very_hard"}:
+        clusterability = max(2, clusterability - 1)
     clusterability = min(5, clusterability)
     reasons["clusterability"] = [
         f"Unique keyword samples: {unique_terms}",
         f"Rising queries: {len(rising_terms)}",
         f"Similarweb folder rows: {len(sw_folder_rows)}",
+        f"KD guidance: {kd_guidance}" if kd_guidance else "",
     ]
 
     monetization = {
@@ -645,6 +658,11 @@ def demand_raw_scores(
         "cluster_summary": cluster_summary(query, top_pages, top_keywords, rising_terms),
         "monetization_summary": monetization_summary(page_type),
         "trends_summary": "Google Trends 可用" if trends_available else "Google Trends 当前不可用，已明确降级",
+        "kd_summary": (
+            f"web.cafe KD={kd_score}，{kd_guidance}"
+            if kd_score is not None and kd_guidance
+            else kd_guidance or "当前没有 web.cafe KD 难度证据。"
+        ),
     }
     return scores, reasons, derived
 
@@ -849,6 +867,7 @@ def demand_report(
     score_result: dict[str, Any],
     trends: dict[str, Any],
     derived: dict[str, Any],
+    kd_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     band = score_result["band"]
     gates_passed = score_result["all_hard_gates_passed"]
@@ -871,7 +890,10 @@ def demand_report(
             if trends.get("available")
             else "Google Trends 当前不可用，趋势判断已降级处理。"
         ),
-        "page_type_recommendation": f"优先按 {page_type_label(page_type)} 承接，而不是先堆泛内容。",
+        "page_type_recommendation": (
+            f"优先按 {page_type_label(page_type)} 承接，而不是先堆泛内容。"
+            + (f" KD 提示：{get_path(kd_payload or {}, 'guidance', default='')}" if kd_payload else "")
+        ),
         "recommended_action": action,
         "first_batch_of_pages": pages,
         "main_uncertainty": "如果没有补充社区 / Reddit 痛点证据，这一版仍然偏向搜索侧验证而不是完整 PMF 结论。",
@@ -968,6 +990,8 @@ def build_workflow(
     bundle_input: str | None = None,
     bundle_payload: dict[str, Any] | None = None,
     trends_input: str | None = None,
+    kd_input: str | None = None,
+    kd_score: int | None = None,
 ) -> dict[str, Any]:
     page_type = query_page_type(query)
     knowledge = knowledge_payload(mode, query)
@@ -978,6 +1002,7 @@ def build_workflow(
             trends = google_trends.collect(query, geo=geo)
         except Exception as exc:
             trends = degraded_trends_payload(query, geo, f"{type(exc).__name__}: {exc}")
+    kd_payload = web_cafe_kd.collect(query=query, kd_score=kd_score, kd_input=kd_input)
     bundle = capture_bundle_payload(
         domain=domain,
         username=username,
@@ -988,9 +1013,9 @@ def build_workflow(
     )
 
     if mode == "demand":
-        raw_scores, reasoning, derived = demand_raw_scores(query=query, page_type=page_type, trends=trends, bundle=bundle)
+        raw_scores, reasoning, derived = demand_raw_scores(query=query, page_type=page_type, trends=trends, bundle=bundle, kd_payload=kd_payload)
         score_result = score_payload("demand", raw_scores)
-        report = demand_report(query=query, page_type=page_type, score_result=score_result, trends=trends, derived=derived)
+        report = demand_report(query=query, page_type=page_type, score_result=score_result, trends=trends, derived=derived, kd_payload=kd_payload)
     else:
         raw_scores, reasoning, derived = attribution_raw_scores(query=query, trends=trends, bundle=bundle)
         score_result = score_payload("attribution", raw_scores)
@@ -1013,6 +1038,7 @@ def build_workflow(
         "knowledge": knowledge,
         "evidence": {
             "trends": trends,
+            "web_cafe_kd": kd_payload,
             "tool_capture": bundle,
         },
         "inferences": {
@@ -1078,6 +1104,8 @@ def main() -> int:
     parser.add_argument("--primary-cta-label", default="", help="Primary CTA label override for generated page artifacts")
     parser.add_argument("--bundle-input", help="Reuse an existing capture_bundle JSON file instead of recapturing")
     parser.add_argument("--trends-input", help="Reuse an existing Google Trends JSON file instead of refetching")
+    parser.add_argument("--kd-input", help="Reuse an existing web.cafe KD JSON file")
+    parser.add_argument("--kd-score", type=int, help="Manual KD score from seo.web.cafe/kd/")
     parser.add_argument("--output", help="Write workflow JSON to a file")
     args = parser.parse_args()
 
@@ -1100,6 +1128,8 @@ def main() -> int:
         primary_cta_label=args.primary_cta_label,
         bundle_input=args.bundle_input,
         trends_input=args.trends_input,
+        kd_input=args.kd_input,
+        kd_score=args.kd_score,
     )
     text = json.dumps(workflow, ensure_ascii=False, indent=2)
     if args.output:

@@ -62,6 +62,7 @@ These scripts now:
 - Similarweb landing-page evidence when available
 - Semrush top pages / organic positions evidence when available
 - Google Trends evidence
+- `seo.web.cafe/kd/` difficulty hint when you need a public directional signal for “直接打主词还是先缩窄页面切口”
 
 ## Workflow
 
@@ -142,6 +143,8 @@ Use each source for a narrow job:
   Provide the practical operating path for Similarweb landing pages, Semrush top pages, and Trends usage.
 - `Google Trends`
   Judge stability, short spike vs durable demand, geography, and wording migration.
+- `web.cafe KD`
+  Provide a lightweight public difficulty hint for whether to attack the head term directly or cut into alternative / scenario / template style pages first.
 - `Similarweb`
   Look for already-validated clicks, especially landing pages and new-click changes.
 - `Semrush`
@@ -156,6 +159,9 @@ Read [references/data-sources.md](references/data-sources.md) before running if 
 This skill now includes script-level capture for the 3ue-backed Similarweb and Semrush accounts.
 
 Read [references/capture-schema.md](references/capture-schema.md) before using the capture scripts so you know what JSON is guaranteed and what is best-effort.
+
+`scripts/web_cafe_kd.py` is the lightweight adapter for `https://seo.web.cafe/kd/`.
+Use it when you want a directional difficulty signal without pretending it replaces Semrush or Similarweb.
 
 ### Shared Browser Executor
 
