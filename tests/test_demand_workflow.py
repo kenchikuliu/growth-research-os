@@ -30,6 +30,7 @@ import render_report
 import workflow_playbook
 import web_cafe_kd
 import keyword_verdict
+import workflow_verdict
 
 
 class GoogleTrendsSummaryTests(unittest.TestCase):
@@ -275,6 +276,14 @@ class DemandWorkflowHeuristicsTests(unittest.TestCase):
         workflow = {
             "input": {"query": "ahrefs alternative"},
             "decision": {"recommended_action": "ship_cluster"},
+            "verdict_outputs": {
+                "page_artifact_input": {
+                    "summary": "建议先做对比页。",
+                    "hero_angle": "不是再多一个工具面板，而是把验证、诊断和页面动作串成一个 workflow。",
+                    "cta_label": "马上注册",
+                    "proof_points": ["proof-a", "proof-b"],
+                }
+            },
             "report": {
                 "core_conclusion": "建议先做对比页。",
                 "first_batch_of_pages": [
@@ -349,6 +358,8 @@ class DemandWorkflowHeuristicsTests(unittest.TestCase):
         self.assertTrue(frontend["blocks"][0]["required"])
         publishable = artifacts["publishable_pages"][0]
         self.assertEqual(publishable["template"], "comparison_page")
+        self.assertEqual(publishable["hero"]["primary_cta"]["label"], "马上注册")
+        self.assertEqual(publishable["hero"]["supporting_proof"], ["proof-a", "proof-b"])
         self.assertEqual(publishable["hero"]["primary_cta"]["url"], "https://example.com/signup")
         self.assertEqual(publishable["sections"][2]["type"], "comparison_table")
 
@@ -1142,7 +1153,7 @@ class BuildWorkflowOrchestrationTests(unittest.TestCase):
 
         self.assertEqual(
             calls,
-            ["knowledge", "trends", "bundle", "raw_scores", "scorecard", "report", "guided_flow", "method_alignment", "artifacts"],
+            ["knowledge", "trends", "bundle", "raw_scores", "scorecard", "report", "guided_flow", "method_alignment", "artifacts", "artifacts"],
         )
         self.assertEqual(workflow["guided_flow"], fake_guided)
         self.assertEqual(workflow["method_alignment"], fake_alignment)
@@ -1151,6 +1162,126 @@ class BuildWorkflowOrchestrationTests(unittest.TestCase):
         self.assertEqual(workflow["evidence"]["web_cafe_kd"]["kd_bucket"], "unknown")
         self.assertEqual(workflow["decision"]["band"], "ship_cluster")
         self.assertEqual(workflow["report"], fake_report)
+
+    def test_build_workflow_rebuilds_page_artifacts_with_verdict_inputs(self) -> None:
+        original_knowledge_payload = run_demand_workflow.knowledge_payload
+        original_collect = google_trends.collect
+        original_capture_bundle_payload = run_demand_workflow.capture_bundle_payload
+        original_demand_raw_scores = run_demand_workflow.demand_raw_scores
+        original_score_payload = run_demand_workflow.score_payload
+        original_demand_report = run_demand_workflow.demand_report
+        original_build_guided_flow = guided_flow.build_guided_flow
+        original_build_method_alignment = run_demand_workflow.build_method_alignment
+        original_kd_collect = web_cafe_kd.collect
+
+        try:
+            run_demand_workflow.knowledge_payload = lambda mode, query: {"gefei": {}, "chuhai": {}}
+            google_trends.collect = lambda query, geo="US", *args, **kwargs: {"available": False, "summary": {"primary_shape": "flat", "top_rising_queries": []}}
+            web_cafe_kd.collect = lambda **kwargs: {
+                "query": kwargs["query"],
+                "available": True,
+                "kd_score": 42,
+                "kd_bucket": "moderate",
+                "guidance": "先从对比页切入。",
+                "notes": [],
+                "source": {"mode": "test_stub"},
+            }
+            run_demand_workflow.capture_bundle_payload = lambda **kwargs: {
+                "summary": {"core_ready_tools": ["semrush", "similarweb"]},
+                "results": {},
+                "normalized": {"tools_ready": ["semrush", "similarweb"]},
+            }
+            run_demand_workflow.demand_raw_scores = lambda **kwargs: (
+                {
+                    "demand_reality": 4,
+                    "search_carry": 4,
+                    "trend_stability": 3,
+                    "serp_entry": 4,
+                    "page_intent_fit": 4,
+                    "clusterability": 4,
+                    "monetization": 3,
+                    "execution_fit": 4,
+                },
+                {},
+                {
+                    "cluster_summary": "可扩为 cluster。",
+                    "page_signal_summary": "页级证据可用。",
+                    "keyword_signal_summary": "关键词证据可用。",
+                    "monetization_summary": "适合注册转化。",
+                    "top_page_examples_text": "example page",
+                },
+            )
+            run_demand_workflow.score_payload = lambda mode, raw_scores: {
+                "band": "ship_cluster",
+                "total_score": 74,
+                "all_hard_gates_passed": True,
+                "breakdown": [],
+            }
+            run_demand_workflow.demand_report = lambda **kwargs: {
+                "mode": "新词 / 新需求验证",
+                "core_conclusion": "建议先做对比页。",
+                "demand_reality": "需求真实。",
+                "search_proof": "搜索承接明确。",
+                "trend_pattern": "趋势平稳。",
+                "page_type_recommendation": "优先按对比页承接。",
+                "recommended_action": "ship_cluster",
+                "first_batch_of_pages": [
+                    {
+                        "working_title": "ahrefs alternative",
+                        "page_type": "对比页",
+                        "primary_intent": "替代方案比较和迁移决策",
+                        "primary_keyword": "ahrefs alternative",
+                        "evidence_basis": "页级证据",
+                        "content_or_tool_structure": "核心差异表 + 适用场景 + CTA",
+                        "hero_primary_cta": "马上注册",
+                        "internal_links_to": "主工具页 / 定价页 / FAQ",
+                        "monetization_path": "注册转化",
+                        "page_blueprint": {
+                            "title_formula": "ahrefs Alternative：为什么很多用户选择你的品牌",
+                            "recommended_h2": "ahrefs vs 你的品牌：Comparison",
+                            "comparison_table_dimensions": ["价格", "功能", "适用场景"],
+                            "fit_section_rule": "只写具体适合谁",
+                        },
+                    }
+                ],
+                "main_uncertainty": "社区证据仍可补。",
+            }
+            guided_flow.build_guided_flow = lambda workflow: {"entry": {}, "step_count": 8, "direct_result": {"band": "ship_cluster"}}
+            run_demand_workflow.build_method_alignment = lambda **kwargs: {
+                "gefei": {"used": True},
+                "chuhai": {"used": True},
+                "web_cafe_simulator": {"used": True},
+            }
+
+            workflow = run_demand_workflow.build_workflow(
+                mode="demand",
+                query="ahrefs alternative",
+                domain="ahrefs.com",
+                geo="US",
+                username="u",
+                password="p",
+                max_node_rotations=1,
+            )
+        finally:
+            run_demand_workflow.knowledge_payload = original_knowledge_payload
+            google_trends.collect = original_collect
+            web_cafe_kd.collect = original_kd_collect
+            run_demand_workflow.capture_bundle_payload = original_capture_bundle_payload
+            run_demand_workflow.demand_raw_scores = original_demand_raw_scores
+            run_demand_workflow.score_payload = original_score_payload
+            run_demand_workflow.demand_report = original_demand_report
+            guided_flow.build_guided_flow = original_build_guided_flow
+            run_demand_workflow.build_method_alignment = original_build_method_alignment
+
+        publishable = workflow["artifacts"]["page_artifacts"]["publishable_pages"][0]
+        page_input = workflow["verdict_outputs"]["page_artifact_input"]
+        self.assertEqual(page_input["cta_label"], "马上注册")
+        self.assertEqual(page_input["template"], "comparison_page")
+        self.assertEqual(publishable["hero"]["primary_cta"]["label"], "马上注册")
+        self.assertEqual(
+            publishable["hero"]["headline"],
+            page_input["hero_angle"],
+        )
 
 
 class TrendsDegradeTests(unittest.TestCase):
@@ -1359,6 +1490,59 @@ class WorkflowNormalizedIntegrationTests(unittest.TestCase):
 
 
 class NormalizedArtifactTests(unittest.TestCase):
+    def test_workflow_verdict_builds_page_artifact_input_and_high_level_scale_verdict(self) -> None:
+        workflow = {
+            "mode": "demand",
+            "input": {"query": "ahrefs alternative", "domain": "ahrefs.com"},
+            "keyword_verdict": {
+                "type": "new_keyword_validation",
+                "summary": "建议先做对比页。",
+                "primary_recommendation": "ship_cluster",
+                "page_type": "优先按对比页承接。",
+                "band": "ship_cluster",
+                "total_score": 74,
+                "all_hard_gates_passed": True,
+                "tools_ready": ["semrush", "similarweb"],
+                "first_batch_titles": ["ahrefs alternative"],
+                "first_moves": ["优先页面型：对比页"],
+                "main_uncertainty": "社区证据仍可补。",
+                "kd": {"bucket": "moderate", "guidance": "先从对比页切入。"},
+            },
+            "artifacts": {
+                "page_artifacts": {
+                    "publishable_pages": [
+                        {
+                            "template": "comparison_page",
+                            "path": "/alternatives/ahrefs-alternative",
+                            "hero": {
+                                "headline": "不是再多一个工具面板，而是把验证、诊断和页面动作串成一个 workflow。",
+                                "subheadline": "先做对比页。",
+                                "primary_cta": {"label": "马上注册"},
+                                "supporting_proof": ["proof-1", "proof-2"],
+                            },
+                            "sections": [{"type": "comparison_table"}, {"type": "faq"}],
+                        }
+                    ]
+                }
+            },
+        }
+        page_input = workflow_verdict.build_page_artifact_input(workflow, workflow["artifacts"]["page_artifacts"])
+        high_level = workflow_verdict.build_high_level_scale_verdict(
+            workflow,
+            {
+                "mode": "demand",
+                "query": "ahrefs alternative",
+                "domain": "ahrefs.com",
+                "decision": {"band": "ship_cluster", "recommended_action": "ship_cluster", "total_score": 74},
+                "normalized_snapshot": {"tools_ready": ["semrush", "similarweb"]},
+            },
+            workflow["artifacts"]["page_artifacts"],
+        )
+        self.assertEqual(page_input["template"], "comparison_page")
+        self.assertEqual(page_input["cta_label"], "马上注册")
+        self.assertEqual(high_level["action"], "ship_cluster")
+        self.assertEqual(high_level["entry_strategy"]["kd_bucket"], "moderate")
+
     def test_page_artifacts_evidence_counts_prefer_normalized_layer(self) -> None:
         workflow = {
             "evidence": {
@@ -1578,6 +1762,15 @@ class WorkflowServiceTests(unittest.TestCase):
                     "page_type_recommendation": "优先按对比页承接。",
                     "first_batch_of_pages": [{"working_title": "ahrefs alternative"}],
                 },
+                "keyword_verdict": {
+                    "summary": "建议继续做。",
+                    "primary_recommendation": "ship_cluster",
+                    "page_type": "优先按对比页承接。",
+                    "kd": {"bucket": "moderate"},
+                    "tools_ready": ["semrush", "similarweb"],
+                    "first_moves": ["优先页面型：对比页"],
+                    "main_uncertainty": "社区证据仍可补。",
+                },
                 "evidence": {
                     "tool_capture": {
                         "normalized": {
@@ -1597,6 +1790,10 @@ class WorkflowServiceTests(unittest.TestCase):
                         "page_count": 1,
                         "pages": [{"slug": "ahrefs-alternative"}],
                     }
+                },
+                "verdict_outputs": {
+                    "page_artifact_input": {"template": "comparison_page", "cta_label": "马上注册"},
+                    "high_level_scale_verdict": {"action": "ship_cluster", "summary": "建议继续做。"},
                 },
             }
             server = workflow_service.build_server("127.0.0.1", 0)
@@ -1633,6 +1830,7 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["request_id"], "wf-1")
         self.assertEqual(payload["data"]["workflow_summary"]["decision"]["recommended_action"], "ship_cluster")
+        self.assertEqual(payload["data"]["workflow_summary"]["verdict_outputs"]["high_level_scale_verdict"]["action"], "ship_cluster")
         self.assertTrue(payload["data"]["page_artifacts"]["available"])
         self.assertEqual(payload["data"]["workflow_summary"]["normalized_snapshot"]["top_keyword_count"], 3)
 
@@ -1648,9 +1846,22 @@ class WorkflowServiceTests(unittest.TestCase):
                     "total_score": 68,
                     "all_hard_gates_passed": True,
                 },
+                "keyword_verdict": {
+                    "summary": "归因基本成立。",
+                    "primary_recommendation": "replicate_narrower_variant",
+                    "page_type": "",
+                    "kd": {"bucket": ""},
+                    "tools_ready": [],
+                    "first_moves": ["先挑一个可复用页面型。"],
+                    "main_uncertainty": "仍需更深层 page-level rows。",
+                },
                 "report": {"core_conclusion": "归因基本成立。"},
                 "evidence": {"tool_capture": {"normalized": {"top_pages": [{}], "top_keywords": [{}, {}], "landing_pages": []}}},
                 "artifacts": {"page_artifacts": {"available": False, "page_count": 0, "pages": []}},
+                "verdict_outputs": {
+                    "page_artifact_input": {"template": "", "cta_label": ""},
+                    "high_level_scale_verdict": {"action": "replicate_narrower_variant", "summary": "归因基本成立。"},
+                },
             }
             server = workflow_service.build_server("127.0.0.1", 0)
             port = server.server_address[1]
@@ -1680,6 +1891,7 @@ class WorkflowServiceTests(unittest.TestCase):
 
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["data"]["scale_output"]["decision"]["band"], "solid_attribution")
+        self.assertEqual(payload["data"]["scale_output"]["verdict_outputs"]["high_level_scale_verdict"]["action"], "replicate_narrower_variant")
         self.assertEqual(payload["data"]["scale_output"]["normalized_snapshot"]["top_keyword_count"], 2)
 
     def test_workflow_service_workflow_playbook_endpoint_returns_playbook(self) -> None:
@@ -1900,6 +2112,10 @@ class WorkflowScaleTests(unittest.TestCase):
                 "first_moves": ["优先页面型：对比页"],
                 "main_uncertainty": "社区证据仍可补。",
             },
+            "verdict_outputs": {
+                "page_artifact_input": {"template": "comparison_page", "cta_label": "马上注册"},
+                "high_level_scale_verdict": {"action": "ship_cluster", "summary": "建议先做对比页。"},
+            },
             "evidence": {
                 "tool_capture": {
                     "normalized": {
@@ -1919,6 +2135,7 @@ class WorkflowScaleTests(unittest.TestCase):
         self.assertEqual(scale["decision"]["recommended_action"], "ship_cluster")
         self.assertEqual(scale["keyword_verdict"]["primary_recommendation"], "ship_cluster")
         self.assertEqual(scale["keyword_verdict"]["kd_bucket"], "moderate")
+        self.assertEqual(scale["verdict_outputs"]["high_level_scale_verdict"]["action"], "ship_cluster")
         self.assertEqual(scale["normalized_snapshot"]["top_page_count"], 2)
         self.assertTrue(scale["page_plan"]["artifacts_available"])
 

@@ -131,6 +131,8 @@ def flatten_scale_result(*, index: int | None, mode: str | None, query: str | No
     decision = scale_output.get("decision") or {}
     direct_answer = scale_output.get("direct_answer") or {}
     page_plan = scale_output.get("page_plan") or {}
+    keyword_verdict = scale_output.get("keyword_verdict") or {}
+    verdict_outputs = scale_output.get("verdict_outputs") or {}
     normalized_snapshot = scale_output.get("normalized_snapshot") or {}
     page_artifacts = result.get("page_artifacts") or {}
     first_pages = page_plan.get("first_batch_of_pages") or []
@@ -146,6 +148,10 @@ def flatten_scale_result(*, index: int | None, mode: str | None, query: str | No
         "all_hard_gates_passed": decision.get("all_hard_gates_passed"),
         "core_conclusion": direct_answer.get("core_conclusion") or "",
         "page_type_recommendation": direct_answer.get("page_type_recommendation") or "",
+        "verdict_summary": keyword_verdict.get("summary") or "",
+        "verdict_action": keyword_verdict.get("primary_recommendation") or "",
+        "verdict_kd_bucket": keyword_verdict.get("kd_bucket") or "",
+        "verdict_page_type": keyword_verdict.get("page_type") or "",
         "tools_ready": ",".join(normalized_snapshot.get("tools_ready") or []),
         "top_page_count": normalized_snapshot.get("top_page_count") or 0,
         "top_keyword_count": normalized_snapshot.get("top_keyword_count") or 0,
@@ -153,6 +159,8 @@ def flatten_scale_result(*, index: int | None, mode: str | None, query: str | No
         "page_cluster_count": normalized_snapshot.get("page_cluster_count") or 0,
         "page_artifact_count": page_plan.get("page_artifact_count") or 0,
         "artifacts_available": page_plan.get("artifacts_available"),
+        "page_input_template": get_path(verdict_outputs, "page_artifact_input", "template", default=""),
+        "page_input_cta": get_path(verdict_outputs, "page_artifact_input", "cta_label", default=""),
         "first_page_titles": " | ".join(
             page.get("working_title") or page.get("primary_keyword") or ""
             for page in first_pages
@@ -160,6 +168,18 @@ def flatten_scale_result(*, index: int | None, mode: str | None, query: str | No
         ),
         "artifact_slugs": " | ".join(slugs),
     }
+
+
+def get_path(data: Any, *path: Any, default: Any = None) -> Any:
+    current: Any = data
+    for key in path:
+        if isinstance(current, dict):
+            current = current.get(key)
+        else:
+            return default
+        if current is None:
+            return default
+    return current
 
 
 def run_workflow_from_payload(payload: dict[str, Any]) -> dict[str, Any]:

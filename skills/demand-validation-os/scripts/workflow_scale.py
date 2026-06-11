@@ -59,6 +59,7 @@ def build_scale_output(workflow: dict[str, Any]) -> dict[str, Any]:
             "first_moves": verdict.get("first_moves") or [],
             "main_uncertainty": verdict.get("main_uncertainty") or "",
         },
+        "verdict_outputs": (workflow.get("verdict_outputs") or {}),
         "normalized_snapshot": {
             "tools_ready": normalized.get("tools_ready") or [],
             "coverage": normalized.get("coverage") or {},

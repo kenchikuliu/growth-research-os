@@ -20,6 +20,8 @@ import page_artifacts
 import scorecard as scorecard_module
 import web_cafe_kd
 import workflow_playbook
+import workflow_scale
+import workflow_verdict
 from browser_capture import iso_utc_now
 
 
@@ -392,6 +394,43 @@ def build_page_artifacts_payload(
         primary_cta_label=primary_cta_label,
     )
     return page_artifacts.build_page_artifacts(workflow, brand_context=context)
+
+
+def build_page_artifacts_with_verdict_inputs(
+    workflow: dict[str, Any],
+    *,
+    brand_name: str = "",
+    brand_url: str = "",
+    primary_cta_url: str = "",
+    primary_cta_label: str = "",
+) -> dict[str, Any]:
+    initial_artifacts = build_page_artifacts_payload(
+        workflow,
+        brand_name=brand_name,
+        brand_url=brand_url,
+        primary_cta_url=primary_cta_url,
+        primary_cta_label=primary_cta_label,
+    )
+    workflow["artifacts"] = {"page_artifacts": initial_artifacts}
+    workflow["verdict_outputs"] = {
+        "page_artifact_input": workflow_verdict.build_page_artifact_input(
+            workflow,
+            initial_artifacts,
+        )
+    }
+    final_artifacts = build_page_artifacts_payload(
+        workflow,
+        brand_name=brand_name,
+        brand_url=brand_url,
+        primary_cta_url=primary_cta_url,
+        primary_cta_label=primary_cta_label,
+    )
+    workflow["artifacts"] = {"page_artifacts": final_artifacts}
+    workflow["verdict_outputs"]["page_artifact_input"] = workflow_verdict.build_page_artifact_input(
+        workflow,
+        final_artifacts,
+    )
+    return final_artifacts
 
 
 def trend_primary_shape(trends: dict[str, Any]) -> str:
@@ -1093,7 +1132,7 @@ def build_workflow(
     )
     workflow["keyword_verdict"] = keyword_verdict.build_keyword_verdict(workflow)
     workflow["artifacts"] = {
-        "page_artifacts": build_page_artifacts_payload(
+        "page_artifacts": build_page_artifacts_with_verdict_inputs(
             workflow,
             brand_name=brand_name,
             brand_url=brand_url,
@@ -1101,6 +1140,11 @@ def build_workflow(
             primary_cta_label=primary_cta_label,
         )
     }
+    workflow["verdict_outputs"]["high_level_scale_verdict"] = workflow_verdict.build_high_level_scale_verdict(
+        workflow,
+        workflow_scale.build_scale_output(workflow),
+        workflow["artifacts"]["page_artifacts"],
+    )
     workflow["playbook"] = workflow_playbook.build_playbook(workflow)
     return workflow
 

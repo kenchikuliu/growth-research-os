@@ -288,6 +288,7 @@ def build_comparison_page_artifact(page: dict[str, Any], workflow: dict[str, Any
     cta_label = brand_context["primary_cta_label"] or page.get("hero_primary_cta") or "马上注册"
     cta_url = brand_context["primary_cta_url"] or brand_context["brand_url"] or "/signup"
     blueprint = page.get("page_blueprint") or {}
+    verdict_input = get_path(workflow, "verdict_outputs", "page_artifact_input", default={}) or {}
     proof_points = build_proof_points(workflow)
     page_slug = slugify(f"{competitor}-alternative")
     keyword_signal = get_path(workflow, "derived", "keyword_signal_summary", default="")
@@ -304,18 +305,19 @@ def build_comparison_page_artifact(page: dict[str, Any], workflow: dict[str, Any
         "title": blueprint.get("title_formula") or f"{competitor} Alternative：为什么很多用户选择{brand_name}",
         "meta_title": blueprint.get("title_formula") or f"{competitor} Alternative：为什么很多用户选择{brand_name}",
         "meta_description": (
-            f"直接回答为什么 {brand_name} 是 {competitor} 的替代方案、它更适合哪类用户、以及用户现在怎么马上开始用。"
+            verdict_input.get("summary")
+            or f"直接回答为什么 {brand_name} 是 {competitor} 的替代方案、它更适合哪类用户、以及用户现在怎么马上开始用。"
         ),
         "h1": blueprint.get("title_formula") or f"{competitor} Alternative：为什么很多用户选择{brand_name}",
         "hero": {
             "eyebrow": "Alternative / Comparison",
-            "headline": f"不是再多一个工具面板，而是把验证、诊断和页面动作串成一个 workflow。",
+            "headline": verdict_input.get("hero_angle") or f"不是再多一个工具面板，而是把验证、诊断和页面动作串成一个 workflow。",
             "subheadline": hero_subheadline,
             "primary_cta": {
-                "label": cta_label,
+                "label": verdict_input.get("cta_label") or cta_label,
                 "url": cta_url,
             },
-            "supporting_proof": proof_points[:3],
+            "supporting_proof": verdict_input.get("proof_points") or proof_points[:3],
         },
         "direct_answers": [
             {
@@ -387,21 +389,22 @@ def build_generic_page_artifact(page: dict[str, Any], workflow: dict[str, Any], 
     page_slug = slugify(page.get("primary_keyword") or page.get("working_title") or "page")
     cta_label = brand_context["primary_cta_label"] or page.get("hero_primary_cta") or "立即开始"
     cta_url = brand_context["primary_cta_url"] or brand_context["brand_url"] or "/start"
+    verdict_input = get_path(workflow, "verdict_outputs", "page_artifact_input", default={}) or {}
     proof_points = build_proof_points(workflow)
     page_json = {
         "page_type": page.get("page_type"),
         "title": page.get("working_title"),
         "h1": page.get("working_title"),
         "hero": {
-            "headline": page.get("working_title"),
+            "headline": verdict_input.get("hero_angle") or page.get("working_title"),
             "subheadline": page.get("content_or_tool_structure"),
             "primary_cta": {
-                "label": cta_label,
+                "label": verdict_input.get("cta_label") or cta_label,
                 "url": cta_url,
             },
         },
         "evidence_basis": page.get("evidence_basis"),
-        "proof_points": proof_points[:3],
+        "proof_points": verdict_input.get("proof_points") or proof_points[:3],
         "internal_links": page.get("internal_links_to"),
         "monetization_path": page.get("monetization_path"),
     }
