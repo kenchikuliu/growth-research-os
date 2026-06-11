@@ -17,6 +17,7 @@ import google_trends
 import guided_flow
 import page_artifacts
 import scorecard as scorecard_module
+import workflow_playbook
 from browser_capture import iso_utc_now
 
 
@@ -1058,6 +1059,7 @@ def build_workflow(
             primary_cta_label=primary_cta_label,
         )
     }
+    workflow["playbook"] = workflow_playbook.build_playbook(workflow)
     return workflow
 
 

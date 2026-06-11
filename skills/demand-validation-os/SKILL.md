@@ -290,13 +290,14 @@ Service behavior:
 Workflow service behavior:
 
 - exposes the higher-level `新词验证 / 榜单归因` output over local HTTP/JSON
-- returns both the final workflow decision and page-artifact JSON
+- returns the final workflow decision, `playbook`, and page-artifact JSON
 - can accept live 3ue credentials, `bundle_input`, or an in-memory `bundle_payload`
 - keeps one workflow request at a time so the capture layer stays serial
 
 Thin scale behavior:
 
 - `/scale` returns only the compact `scale_output`
+- `/scale/playbook` returns `scale_output` plus `playbook`
 - `/scale/page-artifacts` returns `scale_output` plus `page_artifacts`
 - `scripts/run_scale.py` does the same locally, and also supports batch jobs via `--jobs-input`
 - `scripts/run_scale.py` accepts `json / csv / tsv / xlsx` batch inputs and can export flattened rows to `json / csv / tsv / xlsx` with `--table-output`
@@ -335,6 +336,19 @@ curl -s http://127.0.0.1:8766/workflow/page-artifacts \
     "request_id": "wf-1"
   }'
 
+curl -s http://127.0.0.1:8766/workflow/playbook \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "mode": "demand",
+    "query": "ahrefs alternative",
+    "domain": "ahrefs.com",
+    "username": "'"$THREEUE_USERNAME"'",
+    "password": "'"$THREEUE_PASSWORD"'",
+    "brand_name": "Your Brand",
+    "brand_url": "https://example.com",
+    "primary_cta_url": "https://example.com/signup"
+  }'
+
 curl -s http://127.0.0.1:8766/scale/page-artifacts \
   -H 'Content-Type: application/json' \
   -d '{
@@ -346,6 +360,16 @@ curl -s http://127.0.0.1:8766/scale/page-artifacts \
     "brand_name": "Your Brand",
     "brand_url": "https://example.com",
     "primary_cta_url": "https://example.com/signup"
+  }'
+
+curl -s http://127.0.0.1:8766/scale/playbook \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "mode": "attribution",
+    "query": "crazygames.com",
+    "domain": "crazygames.com",
+    "username": "'"$THREEUE_USERNAME"'",
+    "password": "'"$THREEUE_PASSWORD"'"
   }'
 ```
 
@@ -412,6 +436,7 @@ This runner:
 - runs 3ue-backed `capture_bundle.py` when a domain is available
 - computes the scorecard
 - emits a guided `web.cafe`-style staged flow in the final JSON
+- emits a top-level `playbook` for direct execution handoff
 - emits `artifacts.page_artifacts` so comparison / alternative pages can move from blueprint to publishable page JSON
 - prefers the `normalized` capture layer when that layer is present, so later scale/service code can pass a stable bundle instead of raw Semrush / Similarweb payloads only
 

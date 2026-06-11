@@ -115,6 +115,7 @@ def compact_result(result: dict[str, Any], include_workflow: bool) -> dict[str, 
     return {
         "scale_output": result.get("scale_output") or {},
         "page_artifacts": result.get("page_artifacts") or {},
+        "playbook": result.get("playbook") or {},
     }
 
 
@@ -162,6 +163,7 @@ def run_workflow_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "workflow": workflow,
         "scale_output": scale_output,
         "page_artifacts": scale_output.get("artifacts") or {},
+        "playbook": workflow.get("playbook") or {},
     }
 
 
@@ -273,7 +275,14 @@ class WorkflowServiceHandler(BaseHTTPRequestHandler):
             return
 
         request_id = payload.get("request_id") if isinstance(payload, dict) else None
-        if parsed.path not in {"/workflow", "/workflow/page-artifacts", "/scale", "/scale/page-artifacts"}:
+        if parsed.path not in {
+            "/workflow",
+            "/workflow/page-artifacts",
+            "/workflow/playbook",
+            "/scale",
+            "/scale/page-artifacts",
+            "/scale/playbook",
+        }:
             status, error_payload = make_error(
                 status=HTTPStatus.NOT_FOUND,
                 code="not_found",
@@ -326,14 +335,25 @@ class WorkflowServiceHandler(BaseHTTPRequestHandler):
                         "workflow_summary": scale_output,
                         "page_artifacts": page_artifacts,
                     }
+                elif parsed.path == "/workflow/playbook":
+                    data = {
+                        "workflow_summary": scale_output,
+                        "playbook": result["playbook"],
+                    }
                 elif parsed.path == "/scale/page-artifacts":
                     data = {
                         "scale_output": scale_output,
                         "page_artifacts": page_artifacts,
                     }
+                elif parsed.path == "/scale/playbook":
+                    data = {
+                        "scale_output": scale_output,
+                        "playbook": result["playbook"],
+                    }
                 elif parsed.path == "/scale":
                     data = {
                         "scale_output": scale_output,
+                        "playbook": result["playbook"],
                     }
                 else:
                     data = {

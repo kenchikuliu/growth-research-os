@@ -27,6 +27,7 @@ import run_scale
 import page_artifacts
 import tabular_io
 import render_report
+import workflow_playbook
 
 
 class GoogleTrendsSummaryTests(unittest.TestCase):
@@ -1042,6 +1043,7 @@ class BuildWorkflowOrchestrationTests(unittest.TestCase):
         self.assertEqual(workflow["guided_flow"], fake_guided)
         self.assertEqual(workflow["method_alignment"], fake_alignment)
         self.assertEqual(workflow["artifacts"]["page_artifacts"], fake_artifacts)
+        self.assertEqual(workflow["playbook"]["decision"]["recommended_action"], "ship_cluster")
         self.assertEqual(workflow["decision"]["band"], "ship_cluster")
         self.assertEqual(workflow["report"], fake_report)
 
@@ -1203,6 +1205,68 @@ class NormalizedArtifactTests(unittest.TestCase):
         self.assertIn("comparison_table", artifacts["frontend_protocol"]["block_types"])
 
 
+class WorkflowPlaybookTests(unittest.TestCase):
+    def test_build_demand_playbook_collects_page_plan(self) -> None:
+        workflow = {
+            "mode": "demand",
+            "decision": {"recommended_action": "ship_cluster", "band": "ship_cluster", "total_score": 74, "all_hard_gates_passed": True},
+            "report": {
+                "core_conclusion": "建议先做一组页面。",
+                "demand_reality": "需求真实。",
+                "search_proof": "已有搜索承接。",
+                "trend_pattern": "趋势上升。",
+                "page_type_recommendation": "优先按对比页承接。",
+                "main_uncertainty": "社区证据仍可补。",
+                "first_batch_of_pages": [
+                    {"working_title": "ahrefs alternative"},
+                    {"primary_keyword": "ahrefs vs semrush"},
+                ],
+            },
+            "derived": {
+                "page_signal_summary": "Semrush top pages clear.",
+                "keyword_signal_summary": "Similarweb non-brand keywords clear.",
+                "cluster_summary": "可扩为 cluster。",
+                "monetization_summary": "适合注册转化。",
+            },
+            "artifacts": {
+                "page_artifacts": {
+                    "page_count": 2,
+                    "pages": [{"slug": "ahrefs-alternative"}, {"slug": "ahrefs-vs-semrush"}],
+                }
+            },
+        }
+        playbook = workflow_playbook.build_playbook(workflow)
+        self.assertEqual(playbook["mode"], "demand")
+        self.assertEqual(playbook["decision"]["recommended_action"], "ship_cluster")
+        self.assertEqual(playbook["launch_plan"]["page_artifact_count"], 2)
+        self.assertIn("ahrefs alternative", playbook["launch_plan"]["first_batch_titles"])
+
+    def test_build_attribution_playbook_collects_replication_fields(self) -> None:
+        workflow = {
+            "mode": "attribution",
+            "decision": {"recommended_action": "replicate_narrower_variant", "band": "solid_attribution", "total_score": 68, "all_hard_gates_passed": True},
+            "report": {
+                "core_conclusion": "归因基本成立。",
+                "main_growth_pages": ["kw -> title -> url"],
+                "main_growth_terms": "term cluster",
+                "likely_growth_action": "replicate_narrower_variant",
+                "reusable_part": "复用页面型。",
+                "do_not_copy": "不要复制品牌词。",
+                "confidence_and_gaps": "仍需更深层 page-level rows。",
+            },
+            "derived": {
+                "page_signal_summary": "页面层清晰。",
+                "keyword_signal_summary": "关键词层清晰。",
+                "time_window_summary": "窗口明确。",
+                "cluster_summary": "结构可复用。",
+            },
+        }
+        playbook = workflow_playbook.build_playbook(workflow)
+        self.assertEqual(playbook["mode"], "attribution")
+        self.assertEqual(playbook["replication_play"]["reusable_part"], "复用页面型。")
+        self.assertEqual(playbook["decision"]["band"], "solid_attribution")
+
+
 class WorkflowServiceTests(unittest.TestCase):
     def test_workflow_service_returns_scale_output_and_page_artifacts(self) -> None:
         original_build_workflow = workflow_service.run_demand_workflow.build_workflow
@@ -1325,6 +1389,98 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["data"]["scale_output"]["decision"]["band"], "solid_attribution")
         self.assertEqual(payload["data"]["scale_output"]["normalized_snapshot"]["top_keyword_count"], 2)
+
+    def test_workflow_service_workflow_playbook_endpoint_returns_playbook(self) -> None:
+        original_build_workflow = workflow_service.run_demand_workflow.build_workflow
+        try:
+            workflow_service.run_demand_workflow.build_workflow = lambda **kwargs: {
+                "mode": "demand",
+                "input": {"query": kwargs["query"], "domain": kwargs["domain"]},
+                "decision": {
+                    "band": "ship_cluster",
+                    "recommended_action": "ship_cluster",
+                    "total_score": 74,
+                    "all_hard_gates_passed": True,
+                },
+                "report": {"core_conclusion": "建议继续做。", "first_batch_of_pages": []},
+                "evidence": {"tool_capture": {"normalized": {"top_pages": [], "top_keywords": [], "landing_pages": [], "page_clusters": []}}},
+                "artifacts": {"page_artifacts": {"available": False, "page_count": 0, "pages": []}},
+                "playbook": {"mode": "demand", "decision": {"recommended_action": "ship_cluster"}},
+            }
+            server = workflow_service.build_server("127.0.0.1", 0)
+            port = server.server_address[1]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                req = Request(
+                    f"http://127.0.0.1:{port}/workflow/playbook",
+                    data=json.dumps(
+                        {
+                            "mode": "demand",
+                            "query": "ahrefs alternative",
+                            "bundle_payload": {"results": {}, "summary": {}, "normalized": {}},
+                        }
+                    ).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urlopen(req, timeout=5) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+        finally:
+            workflow_service.run_demand_workflow.build_workflow = original_build_workflow
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["data"]["playbook"]["decision"]["recommended_action"], "ship_cluster")
+
+    def test_workflow_service_scale_playbook_endpoint_returns_playbook(self) -> None:
+        original_build_workflow = workflow_service.run_demand_workflow.build_workflow
+        try:
+            workflow_service.run_demand_workflow.build_workflow = lambda **kwargs: {
+                "mode": "attribution",
+                "input": {"query": kwargs["query"], "domain": kwargs["domain"]},
+                "decision": {
+                    "band": "solid_attribution",
+                    "recommended_action": "replicate_narrower_variant",
+                    "total_score": 68,
+                    "all_hard_gates_passed": True,
+                },
+                "report": {"core_conclusion": "归因基本成立。"},
+                "evidence": {"tool_capture": {"normalized": {"top_pages": [{}], "top_keywords": [{}, {}], "landing_pages": [], "page_clusters": []}}},
+                "artifacts": {"page_artifacts": {"available": False, "page_count": 0, "pages": []}},
+                "playbook": {"mode": "attribution", "decision": {"recommended_action": "replicate_narrower_variant"}},
+            }
+            server = workflow_service.build_server("127.0.0.1", 0)
+            port = server.server_address[1]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                req = Request(
+                    f"http://127.0.0.1:{port}/scale/playbook",
+                    data=json.dumps(
+                        {
+                            "mode": "attribution",
+                            "query": "crazygames.com",
+                            "bundle_payload": {"results": {}, "summary": {}, "normalized": {}},
+                        }
+                    ).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urlopen(req, timeout=5) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+        finally:
+            workflow_service.run_demand_workflow.build_workflow = original_build_workflow
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["data"]["playbook"]["decision"]["recommended_action"], "replicate_narrower_variant")
 
     def test_workflow_service_scale_batch_filters_and_sorts(self) -> None:
         original_build_workflow = workflow_service.run_demand_workflow.build_workflow
@@ -1493,6 +1649,7 @@ class RunScaleCliTests(unittest.TestCase):
                 "report": {"core_conclusion": "建议继续做。", "first_batch_of_pages": []},
                 "evidence": {"tool_capture": {"normalized": {"top_pages": [{}], "top_keywords": [{}, {}], "landing_pages": [], "page_clusters": []}}},
                 "artifacts": {"page_artifacts": {"available": True, "page_count": 1, "pages": [{"slug": "job-1"}]}},
+                "playbook": {"mode": kwargs["mode"], "decision": {"recommended_action": "ship_cluster"}},
             }
             result = run_scale.run_one(
                 {"mode": "demand", "query": "ahrefs alternative", "bundle_payload": {"results": {}, "summary": {}, "normalized": {}}},
@@ -1518,6 +1675,7 @@ class RunScaleCliTests(unittest.TestCase):
 
         self.assertEqual(result["scale_output"]["decision"]["recommended_action"], "ship_cluster")
         self.assertTrue(result["page_artifacts"]["available"])
+        self.assertEqual(result["playbook"]["mode"], "demand")
 
     def test_run_scale_reads_batch_jobs_from_json(self) -> None:
         jobs_path = ROOT / "tmp-run-scale-jobs.json"

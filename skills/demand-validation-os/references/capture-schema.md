@@ -147,7 +147,9 @@ Routes:
 - `GET /health`
 - `POST /workflow`
 - `POST /workflow/page-artifacts`
+- `POST /workflow/playbook`
 - `POST /scale`
+- `POST /scale/playbook`
 - `POST /scale/page-artifacts`
 
 Request body supports:
@@ -223,6 +225,37 @@ Example response shape for `POST /workflow/page-artifacts`:
 }
 ```
 
+Example response shape for `POST /workflow/playbook`:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "workflow_summary": {
+      "mode": "demand",
+      "query": "ahrefs alternative",
+      "decision": {
+        "band": "ship_cluster",
+        "recommended_action": "ship_cluster",
+        "total_score": 74,
+        "all_hard_gates_passed": true
+      }
+    },
+    "playbook": {
+      "mode": "demand",
+      "goal": "新词 / 新需求验证",
+      "decision": {
+        "recommended_action": "ship_cluster"
+      },
+      "launch_plan": {
+        "first_batch_titles": [],
+        "artifact_slugs": []
+      }
+    }
+  }
+}
+```
+
 `POST /scale` returns the thinner compact layer only:
 
 ```json
@@ -237,7 +270,8 @@ Example response shape for `POST /workflow/page-artifacts`:
       "page_plan": {},
       "normalized_snapshot": {},
       "artifacts": {}
-    }
+    },
+    "playbook": {}
   }
 }
 ```
@@ -307,6 +341,7 @@ python3 scripts/run_scale.py \
 Default CLI output:
 
 - `scale_output`
+- `playbook`
 - `page_artifacts`
 
 Only include the full workflow tree when `--include-workflow` is passed.
@@ -502,6 +537,22 @@ This reduces coupling to raw:
 - `results.similarweb.data.website_evidence.website_content`
 
 The raw payloads still remain available for deeper debugging or later extraction.
+
+## Playbook Layer
+
+`run_demand_workflow.py` now also emits a top-level `playbook`.
+
+Use it when you need:
+
+- a direct execution handoff for `榜单归因`
+- a launch plan for `新词 / 新需求验证`
+- a stable result layer that is smaller than full workflow JSON but richer than `scale_output`
+
+Typical `playbook` responsibilities:
+
+- compress the decision into one execution-oriented summary
+- separate the next actions from the longer workflow reasoning
+- surface first-batch page titles, artifact slugs, reusable parts, and do-not-copy constraints
 
 ## Frontend Artifact Protocol
 

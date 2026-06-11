@@ -58,6 +58,7 @@ def run_one(job: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
         "workflow": workflow if args.include_workflow else None,
         "scale_output": scale_output,
         "page_artifacts": scale_output.get("artifacts") or {},
+        "playbook": workflow.get("playbook") or {},
     }
 
 
@@ -67,6 +68,7 @@ def compact_result(result: dict[str, Any], include_workflow: bool) -> dict[str, 
     return {
         "scale_output": result.get("scale_output") or {},
         "page_artifacts": result.get("page_artifacts") or {},
+        "playbook": result.get("playbook") or {},
     }
 
 

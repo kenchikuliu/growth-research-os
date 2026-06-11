@@ -115,7 +115,8 @@ Current state:
 - `run_demand_workflow.py` now accepts a full prebuilt `bundle_payload`, not just a file path, so later scale or service code can hand normalized capture data directly into the scoring and artifact layers.
 - `workflow_service.py` is the higher-level scale entrypoint. It returns final `新词验证 / 榜单归因` workflow output plus page-artifact JSON in one HTTP call.
 - `workflow_scale.py` now holds the reusable thin `scale_output` projection so both CLI and HTTP callers get the same compact result shape.
-- `run_scale.py` is the thin local CLI for one-off or batch jobs. It returns `scale_output` plus `page_artifacts`, and only includes full workflow JSON when explicitly requested.
+- `workflow_playbook.py` is the new high-level result layer. It compresses each workflow into a more execution-ready `playbook` for `榜单归因` and `新词验证`.
+- `run_scale.py` is the thin local CLI for one-off or batch jobs. It returns `scale_output`, `playbook`, and `page_artifacts`, and only includes full workflow JSON when explicitly requested.
 - `run_scale.py` now supports `json / csv / tsv / xlsx` batch-job input and flattened `json / csv / tsv / xlsx` output, so leaderboard-style job lists can be run directly without pandas/openpyxl.
 - `run_scale.py` and `workflow_service.py /scale*` now both support leaderboard-style filtering and ranking with `min_score`, `allowed_actions`, `require_tools_ready`, `sort_by`, `ascending`, and `top`.
 - `page_artifacts.py` now prefers the `normalized` capture layer when counting proof, landing-page evidence, and page-cluster evidence, so page JSON generation no longer depends on raw tool-specific shapes alone.
@@ -124,6 +125,7 @@ Current state:
 - `google_trends.py` now tries official Google Trends first, then can fall back to configured RapidAPI or DataForSEO providers, while keeping a normalized `30d / 90d / 12m / 5y` output shape and recording `provider_attempts`.
 - `run_demand_workflow.py` is the one-click orchestrator that combines gefei, chuhai, Google Trends, Similarweb, Semrush, scorecard logic, and a staged guided-flow layer.
 - `page_artifacts.py` plus `run_demand_workflow.py -> artifacts.page_artifacts` push the workflow one step further into publishable page JSON, especially for `alternative / comparison / versus` pages with direct-answer copy, CTA, fit-for blocks, and comparison-table structure.
+- `run_demand_workflow.py` now also emits a top-level `playbook`, so downstream scale / skill code can consume a stable “what should we do next” layer without re-reading the full workflow tree.
 
 HTTP example:
 
@@ -154,6 +156,19 @@ curl -s http://127.0.0.1:8766/workflow/page-artifacts \
     "request_id": "demo-workflow-1"
   }'
 
+curl -s http://127.0.0.1:8766/workflow/playbook \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "mode": "demand",
+    "query": "ahrefs alternative",
+    "domain": "ahrefs.com",
+    "username": "'"$THREEUE_USERNAME"'",
+    "password": "'"$THREEUE_PASSWORD"'",
+    "brand_name": "Your Brand",
+    "brand_url": "https://example.com",
+    "primary_cta_url": "https://example.com/signup"
+  }'
+
 curl -s http://127.0.0.1:8766/scale \
   -H 'Content-Type: application/json' \
   -d '{
@@ -177,6 +192,16 @@ curl -s http://127.0.0.1:8766/scale/page-artifacts \
     "require_tools_ready": "semrush,similarweb",
     "sort_by": "total_score",
     "top": 5
+  }'
+
+curl -s http://127.0.0.1:8766/scale/playbook \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "mode": "attribution",
+    "query": "crazygames.com",
+    "domain": "crazygames.com",
+    "username": "'"$THREEUE_USERNAME"'",
+    "password": "'"$THREEUE_PASSWORD"'"
   }'
 ```
 
