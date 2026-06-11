@@ -21,6 +21,7 @@ SEARCH_OVERVIEW_ROUTE_FRAGMENT = "/websiteanalysis/search-overview/"
 ACTIVATION_HOME_FRAGMENT = "/#/activation/home"
 DIGITALSUITE_HOME_FRAGMENT = "/#/digitalsuite/home"
 SEARCH_BOX_TEXT = "搜索任何网站、关键词或报告"
+POPULAR_PAGES_SELECTED_TAB = "PopularPages"
 DATE_RANGE_RE = re.compile(r"[A-Z][a-z]{2} \d{4} - [A-Z][a-z]{2} \d{4}")
 PERCENT_RE = r"(?:< ?\d+(?:\.\d+)?%|> ?\d+(?:\.\d+)?%|-?[\d,]+(?:\.\d+)?%)"
 VALUE_RE = r"[\d.]+[KMB]?"
@@ -44,6 +45,17 @@ def first_non_null(*values: Any) -> Any:
         if value is not None:
             return value
     return None
+
+
+def get_path(data: dict[str, Any], *path: str, default: Any = None) -> Any:
+    current: Any = data
+    for key in path:
+        if not isinstance(current, dict):
+            return default
+        current = current.get(key)
+        if current is None:
+            return default
+    return current
 
 
 def non_empty_lines(text: str | None) -> list[str]:
@@ -250,6 +262,7 @@ def wait_for_route_ready(
     route_fragment: str,
     title_contains: str,
     body_markers: list[str],
+    expected_url_contains: str | None = None,
     timeout: int = 60,
 ) -> dict[str, Any]:
     deadline = time.time() + timeout
@@ -271,7 +284,7 @@ def wait_for_route_ready(
             title_contains in title
             or any(marker in body_text for marker in body_markers)
             or any(marker in tree for marker in body_markers)
-        ):
+        ) and (not expected_url_contains or expected_url_contains in url):
             return state
         time.sleep(1.0)
     raise BrowseError(f"Timed out waiting for Similarweb route {route_fragment}: {last_state}")
@@ -637,6 +650,54 @@ def parse_website_content(page_text: str | None) -> dict[str, Any] | None:
         "selected_folder_count": int(selected_match.group("count")) if selected_match else None,
         "tabs": tabs,
         "filters": filters,
+        "rows": rows,
+        "visible_row_count": len(rows),
+    }
+
+
+def parse_website_content_top_pages(page_text: str | None) -> dict[str, Any] | None:
+    lines = non_empty_lines(page_text)
+    if "热门页面" not in lines:
+        return None
+
+    rows: list[dict[str, Any]] = []
+    for idx in range(len(lines) - 3):
+        if not re.fullmatch(r"\d+", lines[idx]):
+            continue
+        candidate_url = lines[idx + 1]
+        candidate_share = lines[idx + 2]
+        candidate_change = lines[idx + 3]
+        if not looks_like_similarweb_url_row(candidate_url):
+            continue
+        if not looks_like_percent(candidate_share):
+            continue
+        rows.append(
+            {
+                "rank": int(lines[idx]),
+                "url": candidate_url,
+                "share": candidate_share,
+                "month_over_month_change": candidate_change,
+            }
+        )
+
+    if not rows:
+        empty_title = "抱歉，未找到与该搜索匹配的内容。"
+        empty_description = "尝试扩大您的参数量或搜索其他内容。"
+        if empty_title in lines:
+            return {
+                "rows": [],
+                "visible_row_count": 0,
+                "empty_state": {
+                    "title": empty_title,
+                    "description": empty_description if empty_description in lines else None,
+                },
+            }
+        return {
+            "rows": [],
+            "visible_row_count": 0,
+        }
+
+    return {
         "rows": rows,
         "visible_row_count": len(rows),
     }
@@ -1016,6 +1077,21 @@ def build_website_content(report_snapshot: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_website_content_top_pages(report_snapshot: dict[str, Any]) -> dict[str, Any]:
+    route = report_snapshot.get("url") or ""
+    route_active = "selectedTab=TopPages" in route or f"selectedTab={POPULAR_PAGES_SELECTED_TAB}" in route
+    page_text = report_snapshot.get("page_frame_text")
+    parsed = parse_website_content_top_pages(page_text) if route_active else None
+    return {
+        "available": route_active,
+        "route": route,
+        "title": report_snapshot.get("title"),
+        "domain": report_snapshot.get("query_domain"),
+        "summary": parsed,
+        "raw_text_excerpt": collapse_report_text(page_text)[:1500] if page_text else "",
+    }
+
+
 def build_search_overview(report_snapshot: dict[str, Any]) -> dict[str, Any]:
     page_text = report_snapshot.get("page_frame_text")
     top_non_brand_keywords = parse_top_non_brand_keywords(page_text)
@@ -1028,6 +1104,63 @@ def build_search_overview(report_snapshot: dict[str, Any]) -> dict[str, Any]:
         "summary": parse_search_overview_summary(page_text),
         "top_non_brand_keywords": top_non_brand_keywords,
         "paid_landing_pages": paid_landing_pages,
+    }
+
+
+def build_keyword_research(
+    *,
+    query: str,
+    quick_search: dict[str, Any],
+    modal_state: dict[str, Any],
+    autocomplete_keywords: list[Any],
+    search_overview: dict[str, Any],
+    organic_search_overview: dict[str, Any],
+    paid_search_overview: dict[str, Any],
+    report_links: list[dict[str, Any]],
+    home_signals: dict[str, Any],
+) -> dict[str, Any]:
+    priority_alerts = [row for row in home_signals.get("priority_alerts", []) if row.get("metric") == "keywords"]
+    seed_keywords = (modal_state.get("keywords") or [])[:10]
+    route_candidates = build_search_route_candidates(report_links)
+    return {
+        "available": bool(
+            quick_search.get("ok")
+            or seed_keywords
+            or autocomplete_keywords
+            or get_path(search_overview, "top_non_brand_keywords", "rows", default=[])
+            or priority_alerts
+        ),
+        "seed_domain": query,
+        "quick_search_keywords": seed_keywords,
+        "autocomplete_keywords": autocomplete_keywords or [],
+        "top_non_brand_keywords": search_overview.get("top_non_brand_keywords") or {},
+        "organic_search_overview": organic_search_overview,
+        "paid_search_overview": paid_search_overview,
+        "priority_keyword_alerts": priority_alerts,
+        "route_candidates": route_candidates,
+    }
+
+
+def build_landing_pages_research(
+    *,
+    report_links: list[dict[str, Any]],
+    website_content: dict[str, Any],
+    website_content_top_pages: dict[str, Any],
+    search_overview: dict[str, Any],
+    home_signals: dict[str, Any],
+) -> dict[str, Any]:
+    priority_alerts = [row for row in home_signals.get("priority_alerts", []) if row.get("metric") == "landing_pages"]
+    route_candidates = build_landing_page_route_candidates(report_links)
+    folder_rows = get_path(website_content, "summary", "rows", default=[])
+    top_page_rows = get_path(website_content_top_pages, "summary", "rows", default=[])
+    paid_landing_rows = get_path(search_overview, "paid_landing_pages", "rows", default=[])
+    return {
+        "available": bool(folder_rows or top_page_rows or paid_landing_rows or priority_alerts or route_candidates),
+        "folder_rows": folder_rows,
+        "top_pages": website_content_top_pages,
+        "paid_landing_pages": search_overview.get("paid_landing_pages") or {},
+        "priority_landing_page_alerts": priority_alerts,
+        "route_candidates": route_candidates,
     }
 
 
@@ -1064,6 +1197,7 @@ def navigate_to_route(
     route_fragment: str,
     title_contains: str,
     body_markers: list[str],
+    expected_url_contains: str | None = None,
 ) -> tuple[bool, str]:
     target = f"https://sim.3ue.com{route}"
     try:
@@ -1076,13 +1210,27 @@ def navigate_to_route(
             """,
             timeout=20,
         )
-        wait_for_route_ready(browser, route_fragment, title_contains, body_markers, timeout=45)
+        wait_for_route_ready(
+            browser,
+            route_fragment,
+            title_contains,
+            body_markers,
+            expected_url_contains=expected_url_contains,
+            timeout=45,
+        )
         return True, "hash_route_assign"
     except BrowseError:
         pass
     try:
         browser.open(target, timeout=90)
-        wait_for_route_ready(browser, route_fragment, title_contains, body_markers, timeout=45)
+        wait_for_route_ready(
+            browser,
+            route_fragment,
+            title_contains,
+            body_markers,
+            expected_url_contains=expected_url_contains,
+            timeout=45,
+        )
         return True, "direct_route_open_after_entry"
     except BrowseError:
         return False, "unresolved"
@@ -1096,12 +1244,110 @@ def find_route_hint(report_links: list[dict[str, Any]], route_fragment: str) -> 
     return None
 
 
+def find_route_hints_by_text(report_links: list[dict[str, Any]], text: str) -> list[str]:
+    matches = []
+    for item in report_links:
+        if str(item.get("text") or "").strip() == text:
+            href = str(item.get("href") or "")
+            if href:
+                matches.append(href)
+    return matches
+
+
+def build_selected_tab_route(route: str | None, selected_tab: str) -> str | None:
+    if not route:
+        return None
+    if "selectedTab=" in route:
+        return re.sub(r"selectedTab=[^&#]+", f"selectedTab={selected_tab}", route)
+    separator = "&" if "?" in route else "?"
+    return f"{route}{separator}selectedTab={selected_tab}"
+
+
+def normalize_route_candidate(label: str, href: str, source: str, reason: str) -> dict[str, str]:
+    return {
+        "label": label,
+        "href": href,
+        "source": source,
+        "reason": reason,
+    }
+
+
+def dedupe_route_candidates(candidates: list[dict[str, str]]) -> list[dict[str, str]]:
+    deduped: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in candidates:
+        href = str(item.get("href") or "")
+        label = str(item.get("label") or "")
+        if not href:
+            continue
+        key = (label, href)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def build_search_route_candidates(report_links: list[dict[str, Any]]) -> list[dict[str, str]]:
+    candidates: list[dict[str, str]] = []
+    for item in report_links:
+        text = str(item.get("text") or "").strip()
+        href = str(item.get("href") or "")
+        if not href:
+            continue
+        if SEARCH_OVERVIEW_ROUTE_FRAGMENT in href or "Keywords_filters=" in href:
+            reason = "search-overview-route-hint"
+            if "Keywords_filters=OP;%3D%3D;0" in href or text == "自然搜索":
+                reason = "organic-search-route-hint"
+            elif "Keywords_filters=OP;%3D%3D;1" in href or text == "付费搜索":
+                reason = "paid-search-route-hint"
+            label = text or "搜索概况"
+            candidates.append(normalize_route_candidate(label, href, "report_link", reason))
+    return dedupe_route_candidates(candidates)
+
+
+def build_landing_page_route_candidates(report_links: list[dict[str, Any]]) -> list[dict[str, str]]:
+    candidates: list[dict[str, str]] = []
+    website_content_route = find_route_hint(report_links, WEBSITE_CONTENT_ROUTE_FRAGMENT)
+    if website_content_route:
+        candidates.append(
+            normalize_route_candidate(
+                "网站内容 / 文件夹",
+                website_content_route,
+                "report_link",
+                "website-content-folders-route",
+            )
+        )
+        top_pages_route = build_selected_tab_route(website_content_route, POPULAR_PAGES_SELECTED_TAB)
+        if top_pages_route:
+            candidates.append(
+                normalize_route_candidate(
+                    "网站内容 / 热门页面",
+                    top_pages_route,
+                    "derived",
+                    "website-content-top-pages-derived-route",
+                )
+            )
+    for item in build_search_route_candidates(report_links):
+        if item["label"] in {"自然搜索", "付费搜索", "搜索"}:
+            candidates.append(
+                normalize_route_candidate(
+                    f"搜索 / {item['label']}",
+                    item["href"],
+                    item["source"],
+                    "search-route-candidate-for-landing-and-keyword-evidence",
+                )
+            )
+    return dedupe_route_candidates(candidates)
+
+
 def capture_deep_route_snapshot(
     browser: Any,
     route: str | None,
     route_fragment: str,
     title_contains: str,
     body_markers: list[str],
+    expected_url_contains: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if not route:
         return {}, {"ok": False, "reason": "route-hint-missing"}
@@ -1111,6 +1357,7 @@ def capture_deep_route_snapshot(
         route_fragment=route_fragment,
         title_contains=title_contains,
         body_markers=body_markers,
+        expected_url_contains=expected_url_contains,
     )
     if not ok:
         return {}, {"ok": False, "reason": "route-navigation-failed", "method": method, "route": route}
@@ -1164,10 +1411,16 @@ def collect(
             route_navigation_used = "not-attempted"
             report_snapshot: dict[str, Any] = {}
             website_content_snapshot: dict[str, Any] = {}
+            website_content_top_pages_snapshot: dict[str, Any] = {}
             search_overview_snapshot: dict[str, Any] = {}
+            organic_search_snapshot: dict[str, Any] = {}
+            paid_search_snapshot: dict[str, Any] = {}
             deep_route_status: dict[str, Any] = {
                 "website_content": {"ok": False, "reason": "not-attempted"},
+                "website_content_top_pages": {"ok": False, "reason": "not-attempted"},
                 "search_overview": {"ok": False, "reason": "not-attempted"},
+                "search_overview_organic": {"ok": False, "reason": "not-attempted"},
+                "search_overview_paid": {"ok": False, "reason": "not-attempted"},
             }
 
             for node_round in range(max_node_rotations + 1):
@@ -1274,6 +1527,22 @@ def collect(
                             route_fragment=WEBSITE_CONTENT_ROUTE_FRAGMENT,
                             title_contains="网站内容",
                             body_markers=["文件夹", "业务线", "热门页面"],
+                            expected_url_contains="selectedTab=Folders",
+                        )
+                        website_content_top_pages_route = build_selected_tab_route(
+                            website_content_route,
+                            POPULAR_PAGES_SELECTED_TAB,
+                        )
+                        (
+                            website_content_top_pages_snapshot,
+                            deep_route_status["website_content_top_pages"],
+                        ) = capture_deep_route_snapshot(
+                            executor.browser,
+                            route=website_content_top_pages_route,
+                            route_fragment=WEBSITE_CONTENT_ROUTE_FRAGMENT,
+                            title_contains="网站内容",
+                            body_markers=["热门页面", "文件夹", "子域"],
+                            expected_url_contains=f"selectedTab={POPULAR_PAGES_SELECTED_TAB}",
                         )
                         search_overview_route = find_route_hint(report_links, SEARCH_OVERVIEW_ROUTE_FRAGMENT)
                         search_overview_snapshot, deep_route_status["search_overview"] = capture_deep_route_snapshot(
@@ -1282,6 +1551,25 @@ def collect(
                             route_fragment=SEARCH_OVERVIEW_ROUTE_FRAGMENT,
                             title_contains="搜索概况",
                             body_markers=["搜索流量", "热门非品牌关键词", "付费登录页"],
+                            expected_url_contains="search-overview",
+                        )
+                        organic_search_route = next(iter(find_route_hints_by_text(report_links, "自然搜索")), None)
+                        organic_search_snapshot, deep_route_status["search_overview_organic"] = capture_deep_route_snapshot(
+                            executor.browser,
+                            route=organic_search_route,
+                            route_fragment=SEARCH_OVERVIEW_ROUTE_FRAGMENT,
+                            title_contains="搜索概况",
+                            body_markers=["自然搜索", "热门非品牌关键词", "搜索流量"],
+                            expected_url_contains="Keywords_filters=OP;%3D%3D;0",
+                        )
+                        paid_search_route = next(iter(find_route_hints_by_text(report_links, "付费搜索")), None)
+                        paid_search_snapshot, deep_route_status["search_overview_paid"] = capture_deep_route_snapshot(
+                            executor.browser,
+                            route=paid_search_route,
+                            route_fragment=SEARCH_OVERVIEW_ROUTE_FRAGMENT,
+                            title_contains="搜索概况",
+                            body_markers=["付费搜索", "付费登录页", "搜索流量"],
+                            expected_url_contains="Keywords_filters=OP;%3D%3D;1",
                         )
                     except BrowseError:
                         report_snapshot = {}
@@ -1369,7 +1657,35 @@ def collect(
 
         website_performance = build_website_performance(report_snapshot)
         website_content = build_website_content(website_content_snapshot)
+        website_content_top_pages = build_website_content_top_pages(website_content_top_pages_snapshot)
         search_overview = build_search_overview(search_overview_snapshot)
+        organic_search_overview = build_search_overview(organic_search_snapshot)
+        paid_search_overview = build_search_overview(paid_search_snapshot)
+        report_links = website_performance.get("route_hints") or []
+        website_performance_route_candidates = dedupe_route_candidates(
+            [
+                normalize_route_candidate("网站表现", href, "report_link", "website-performance-route")
+                for href in find_route_hints_by_text(report_links, "网站表现")
+            ]
+        )
+        keyword_research = build_keyword_research(
+            query=query,
+            quick_search=quick_search,
+            modal_state=modal_state,
+            autocomplete_keywords=autocomplete_keywords or [],
+            search_overview=search_overview,
+            organic_search_overview=organic_search_overview,
+            paid_search_overview=paid_search_overview,
+            report_links=report_links,
+            home_signals=home_signals,
+        )
+        landing_pages_research = build_landing_pages_research(
+            report_links=report_links,
+            website_content=website_content,
+            website_content_top_pages=website_content_top_pages,
+            search_overview=search_overview,
+            home_signals=home_signals,
+        )
 
         notes = [
             "3ue Similarweb session opened via dashboard card.",
@@ -1386,6 +1702,10 @@ def collect(
             notes.append("Website-content folder rows were extracted as page-shape evidence from the authenticated Similarweb shell.")
         if search_overview.get("available"):
             notes.append("Search-overview summary, non-brand keyword rows, and paid landing pages were extracted from the authenticated Similarweb shell.")
+        if website_content_top_pages.get("available"):
+            notes.append("Website-content 热门页面 / PopularPages route was attempted so landing-page style rows can be harvested when the shell exposes them.")
+        if organic_search_overview.get("available") or paid_search_overview.get("available"):
+            notes.append("Filtered search-overview routes for 自然搜索 / 付费搜索 were attempted as separate keyword-research artifacts.")
         if node_switches:
             notes.append("Daily usage limit was detected; Similarweb node was rotated automatically and the shell/report route was retried.")
         if route_navigation_used == "hash_route_assign":
@@ -1446,12 +1766,8 @@ def collect(
                 "report_suggestions": report_suggestions,
                 "website_candidate_clicked": clicked_candidate,
                 "report_navigation_used": route_navigation_used,
-                "website_performance_route_candidates": [
-                    item for item in favorite_items if item.get("state_name") == "digitalsuite_website_websiteperformance"
-                ],
-                "landing_pages_route_candidates": [
-                    item for item in favorite_items if item.get("state_name") == "organicsearch_website_landingpages_v2"
-                ],
+                "website_performance_route_candidates": website_performance_route_candidates,
+                "landing_pages_route_candidates": build_landing_page_route_candidates(report_links),
                 "autocomplete_websites": normalize_website_rows(autocomplete_websites or []),
                 "autocomplete_keywords": autocomplete_keywords or [],
                 "similar_sites": similar_sites or [],
@@ -1459,7 +1775,10 @@ def collect(
                 "deep_route_status": deep_route_status,
                 "website_performance": website_performance,
                 "website_content": website_content,
+                "website_content_top_pages": website_content_top_pages,
                 "search_overview": search_overview,
+                "keyword_research": keyword_research,
+                "landing_pages_research": landing_pages_research,
             },
         }
     finally:

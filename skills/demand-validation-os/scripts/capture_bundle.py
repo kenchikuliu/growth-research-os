@@ -45,6 +45,8 @@ def assess_capture_quality(tool: str, data: dict[str, Any] | None) -> dict[str, 
     if tool == "similarweb":
         website_perf = data.get("website_evidence", {}).get("website_performance", {})
         website_content = data.get("website_evidence", {}).get("website_content", {})
+        landing_pages_research = data.get("website_evidence", {}).get("landing_pages_research", {})
+        keyword_research = data.get("website_evidence", {}).get("keyword_research", {})
         search_overview = data.get("website_evidence", {}).get("search_overview", {})
         home_signals = data.get("website_evidence", {}).get("home_signals", {})
         quick_search = data.get("website_evidence", {}).get("quick_search", {})
@@ -59,6 +61,10 @@ def assess_capture_quality(tool: str, data: dict[str, Any] | None) -> dict[str, 
                 reasons.append("paid-landing-pages-ready")
             if non_brand_keyword_rows > 0:
                 reasons.append("non-brand-keywords-ready")
+            if landing_pages_research.get("available"):
+                reasons.append("landing-pages-research-ready")
+            if keyword_research.get("available"):
+                reasons.append("keyword-research-ready")
             return {
                 "status": "ok",
                 "core_ready": True,

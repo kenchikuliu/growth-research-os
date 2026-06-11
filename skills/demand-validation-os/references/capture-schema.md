@@ -204,6 +204,22 @@ Collect when a target domain has a reachable report or state artifact.
         ]
       }
     },
+    "website_content_top_pages": {
+      "available": true,
+      "route": "https://sim.3ue.com/#/digitalsuite/websiteanalysis/overview/website-content/*/999/3m?webSource=Total&key=crazygames.com&selectedTab=PopularPages",
+      "title": "网站内容",
+      "domain": "crazygames.com",
+      "summary": {
+        "rows": [
+          {
+            "rank": 1,
+            "url": "crazygames.com/game/geometry-dash-online",
+            "share": "3.94%",
+            "month_over_month_change": "0%"
+          }
+        ]
+      }
+    },
     "search_overview": {
       "available": true,
       "route": "https://sim.3ue.com/#/digitalsuite/websiteanalysis/search-overview/*/999/3m?webSource=Total&key=crazygames.com",
@@ -247,6 +263,80 @@ Collect when a target domain has a reachable report or state artifact.
           }
         ]
       }
+    },
+    "keyword_research": {
+      "available": true,
+      "seed_domain": "crazygames.com",
+      "quick_search_keywords": ["crazygames", "crazygames.com"],
+      "autocomplete_keywords": [],
+      "top_non_brand_keywords": {
+        "rows": [
+          {
+            "keyword": "juegos",
+            "clicks": "1.2M"
+          }
+        ]
+      },
+      "organic_search_overview": {},
+      "paid_search_overview": {},
+      "priority_keyword_alerts": [
+        {
+          "domain": "kimi.com",
+          "new_count": 195,
+          "metric": "keywords"
+        }
+      ],
+      "route_candidates": [
+        {
+          "label": "自然搜索",
+          "href": "#/digitalsuite/websiteanalysis/search-overview/*/999/3m?webSource=Total&key=crazygames.com&Keywords_filters=OP;%3D%3D;0",
+          "source": "report_link",
+          "reason": "organic-search-route-hint"
+        }
+      ]
+    },
+    "landing_pages_research": {
+      "available": true,
+      "folder_rows": [
+        {
+          "rank": 1,
+          "folder": "crazygames.com/game",
+          "share": "41.96%"
+        }
+      ],
+      "top_pages": {
+        "summary": {
+          "rows": [
+            {
+              "rank": 1,
+              "url": "crazygames.com/game/geometry-dash-online"
+            }
+          ]
+        }
+      },
+      "paid_landing_pages": {
+        "rows": [
+          {
+            "url": "crazygames.com/game/geometry-dash-online",
+            "clicks": "18K"
+          }
+        ]
+      },
+      "priority_landing_page_alerts": [
+        {
+          "domain": "alibabacloud.com",
+          "new_count": 97,
+          "metric": "landing_pages"
+        }
+      ],
+      "route_candidates": [
+        {
+          "label": "网站内容 / 热门页面",
+          "href": "#/digitalsuite/websiteanalysis/overview/website-content/*/999/3m?webSource=Total&key=crazygames.com&selectedTab=PopularPages",
+          "source": "derived",
+          "reason": "website-content-top-pages-derived-route"
+        }
+      ]
     },
     "home_signals": {
       "route": "https://sim.3ue.com/#/activation/home",
@@ -294,6 +384,8 @@ Recommended item shapes:
 - `网站表现` is the current stable Similarweb report baseline in this skill.
 - When the shell stays healthy, the capture now also emits structured `website_content` folder rows plus `search_overview` keyword and paid-landing-page rows.
 - `home_signals.priority_alerts` is the current fallback growth-signal layer when Similarweb shell routing is only partially ready.
+- `keyword_research` groups quick-search keyword seeds, search-overview route candidates, filtered `自然搜索 / 付费搜索` attempts, and Similarweb keyword alerts into one reusable JSON block.
+- `landing_pages_research` groups website-content folders, 热门页面 / `selectedTab=PopularPages` attempts, paid landing pages, and Similarweb landing-page alerts into one reusable JSON block.
 - If a deeper target-domain report capture is blocked, still emit `account_state` plus any route/state evidence gathered from favorites, recent items, settings, and autocomplete.
 - Do not silently fake missing report sections. Emit empty arrays and explain the gap in `raw_artifacts.notes`.
 

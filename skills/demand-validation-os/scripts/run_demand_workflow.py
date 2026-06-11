@@ -14,6 +14,7 @@ from typing import Any
 import capture_bundle
 import google_trends
 import guided_flow
+import page_artifacts
 import scorecard as scorecard_module
 from browser_capture import iso_utc_now
 
@@ -301,6 +302,23 @@ def capture_bundle_payload(
         "all_succeeded": failures == 0,
     }
     return bundle
+
+
+def build_page_artifacts_payload(
+    workflow: dict[str, Any],
+    *,
+    brand_name: str = "",
+    brand_url: str = "",
+    primary_cta_url: str = "",
+    primary_cta_label: str = "",
+) -> dict[str, Any]:
+    context = page_artifacts.brand_context_payload(
+        brand_name=brand_name,
+        brand_url=brand_url,
+        primary_cta_url=primary_cta_url,
+        primary_cta_label=primary_cta_label,
+    )
+    return page_artifacts.build_page_artifacts(workflow, brand_context=context)
 
 
 def trend_primary_shape(trends: dict[str, Any]) -> str:
@@ -872,6 +890,10 @@ def build_workflow(
     username: str,
     password: str,
     max_node_rotations: int,
+    brand_name: str = "",
+    brand_url: str = "",
+    primary_cta_url: str = "",
+    primary_cta_label: str = "",
     bundle_input: str | None = None,
     trends_input: str | None = None,
 ) -> dict[str, Any]:
@@ -908,6 +930,12 @@ def build_workflow(
             "query": query,
             "domain": domain,
             "geo": geo,
+            "brand_context": {
+                "brand_name": brand_name,
+                "brand_url": brand_url,
+                "primary_cta_url": primary_cta_url,
+                "primary_cta_label": primary_cta_label,
+            },
         },
         "knowledge": knowledge,
         "evidence": {
@@ -949,6 +977,15 @@ def build_workflow(
         bundle=bundle,
         guided=workflow["guided_flow"],
     )
+    workflow["artifacts"] = {
+        "page_artifacts": build_page_artifacts_payload(
+            workflow,
+            brand_name=brand_name,
+            brand_url=brand_url,
+            primary_cta_url=primary_cta_url,
+            primary_cta_label=primary_cta_label,
+        )
+    }
     return workflow
 
 
@@ -961,6 +998,10 @@ def main() -> int:
     parser.add_argument("--username", default=os.environ.get("THREEUE_USERNAME", ""))
     parser.add_argument("--password", default=os.environ.get("THREEUE_PASSWORD", ""))
     parser.add_argument("--max-node-rotations", type=int, default=2)
+    parser.add_argument("--brand-name", default="", help="Our brand name for page-artifact generation")
+    parser.add_argument("--brand-url", default="", help="Our canonical product URL for page-artifact generation")
+    parser.add_argument("--primary-cta-url", default="", help="Primary CTA target URL for generated page artifacts")
+    parser.add_argument("--primary-cta-label", default="", help="Primary CTA label override for generated page artifacts")
     parser.add_argument("--bundle-input", help="Reuse an existing capture_bundle JSON file instead of recapturing")
     parser.add_argument("--trends-input", help="Reuse an existing Google Trends JSON file instead of refetching")
     parser.add_argument("--output", help="Write workflow JSON to a file")
@@ -979,6 +1020,10 @@ def main() -> int:
         username=args.username,
         password=args.password,
         max_node_rotations=args.max_node_rotations,
+        brand_name=args.brand_name,
+        brand_url=args.brand_url,
+        primary_cta_url=args.primary_cta_url,
+        primary_cta_label=args.primary_cta_label,
         bundle_input=args.bundle_input,
         trends_input=args.trends_input,
     )

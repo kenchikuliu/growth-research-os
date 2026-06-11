@@ -164,6 +164,104 @@ class OpenSemrushOverviewRotationTests(unittest.TestCase):
 
 
 class SimilarwebCollectRotationTests(unittest.TestCase):
+    def test_route_candidate_helpers_promote_search_and_landing_paths(self) -> None:
+        report_links = [
+            {
+                "text": "网站内容",
+                "href": "#/digitalsuite/websiteanalysis/overview/website-content/*/999/3m?webSource=Total&key=crazygames.com&selectedTab=Folders",
+            },
+            {
+                "text": "自然搜索",
+                "href": "#/digitalsuite/websiteanalysis/search-overview/*/999/3m?webSource=Total&key=crazygames.com&Keywords_filters=OP;%3D%3D;0",
+            },
+            {
+                "text": "付费搜索",
+                "href": "#/digitalsuite/websiteanalysis/search-overview/*/999/3m?webSource=Total&key=crazygames.com&Keywords_filters=OP;%3D%3D;1",
+            },
+        ]
+
+        search_routes = capture_similarweb.build_search_route_candidates(report_links)
+        landing_routes = capture_similarweb.build_landing_page_route_candidates(report_links)
+
+        self.assertTrue(any(item["label"] == "自然搜索" for item in search_routes))
+        self.assertTrue(any(item["label"] == "付费搜索" for item in search_routes))
+        self.assertTrue(any(item["label"] == "网站内容 / 热门页面" for item in landing_routes))
+        self.assertTrue(any("selectedTab=PopularPages" in item["href"] for item in landing_routes))
+
+    def test_research_layers_group_existing_similarweb_signals(self) -> None:
+        report_links = [
+            {
+                "text": "搜索",
+                "href": "#/digitalsuite/websiteanalysis/search-overview/*/999/3m?webSource=Total&key=crazygames.com",
+            },
+            {
+                "text": "网站内容",
+                "href": "#/digitalsuite/websiteanalysis/overview/website-content/*/999/3m?webSource=Total&key=crazygames.com&selectedTab=Folders",
+            },
+        ]
+        keyword_research = capture_similarweb.build_keyword_research(
+            query="crazygames.com",
+            quick_search={"ok": True},
+            modal_state={"keywords": ["crazygames", "crazygames.com"]},
+            autocomplete_keywords=[],
+            search_overview={"top_non_brand_keywords": {"rows": [{"keyword": "free games"}]}},
+            organic_search_overview={},
+            paid_search_overview={},
+            report_links=report_links,
+            home_signals={"priority_alerts": [{"metric": "keywords", "domain": "kimi.com"}]},
+        )
+        landing_research = capture_similarweb.build_landing_pages_research(
+            report_links=report_links,
+            website_content={"summary": {"rows": [{"folder": "/game"}]}},
+            website_content_top_pages={"summary": {"rows": [{"url": "crazygames.com/game/1"}]}},
+            search_overview={"paid_landing_pages": {"rows": [{"url": "crazygames.com"}]}},
+            home_signals={"priority_alerts": [{"metric": "landing_pages", "domain": "alibabacloud.com"}]},
+        )
+
+        self.assertTrue(keyword_research["available"])
+        self.assertEqual(keyword_research["quick_search_keywords"][0], "crazygames")
+        self.assertTrue(keyword_research["route_candidates"])
+        self.assertTrue(landing_research["available"])
+        self.assertEqual(landing_research["folder_rows"][0]["folder"], "/game")
+        self.assertTrue(landing_research["route_candidates"])
+
+    def test_build_website_content_top_pages_rejects_folder_route_and_accepts_popular_pages(self) -> None:
+        folder_snapshot = {
+            "url": "https://sim.3ue.com/#/digitalsuite/websiteanalysis/overview/website-content/*/999/3m?webSource=Total&key=crazygames.com&selectedTab=Folders",
+            "title": "网站内容",
+            "query_domain": "crazygames.com",
+            "page_frame_text": "文件夹 热门页面 1 crazygames.com/game 41.96% 0.41 pp",
+        }
+        popular_snapshot = {
+            "url": "https://sim.3ue.com/#/digitalsuite/websiteanalysis/overview/website-content/*/999/3m?webSource=Total&key=crazygames.com&selectedTab=PopularPages",
+            "title": "网站内容",
+            "query_domain": "crazygames.com",
+            "page_frame_text": "\n".join(
+                [
+                    "热门页面",
+                    "所有",
+                    "新建",
+                    "时下流行",
+                    "表现最佳",
+                    "营销活动（UTM）",
+                    "抱歉，未找到与该搜索匹配的内容。",
+                    "尝试扩大您的参数量或搜索其他内容。",
+                ]
+            ),
+        }
+
+        folder_result = capture_similarweb.build_website_content_top_pages(folder_snapshot)
+        popular_result = capture_similarweb.build_website_content_top_pages(popular_snapshot)
+
+        self.assertFalse(folder_result["available"])
+        self.assertIsNone(folder_result["summary"])
+        self.assertTrue(popular_result["available"])
+        self.assertEqual(popular_result["summary"]["visible_row_count"], 0)
+        self.assertEqual(
+            popular_result["summary"]["empty_state"]["title"],
+            "抱歉，未找到与该搜索匹配的内容。",
+        )
+
     def test_collect_rotates_on_usage_limit_then_returns_report(self) -> None:
         class FakeBrowser:
             def __init__(self) -> None:
@@ -368,6 +466,9 @@ class SimilarwebCollectRotationTests(unittest.TestCase):
         self.assertEqual(len(data["raw_artifacts"]["usage_limit_events"]), 1)
         self.assertEqual(data["raw_artifacts"]["usage_limit_events"][0]["stage"], "tool_open")
         self.assertTrue(data["website_evidence"]["website_performance"]["available"])
+        self.assertIn("website_content_top_pages", data["website_evidence"])
+        self.assertIn("keyword_research", data["website_evidence"])
+        self.assertIn("landing_pages_research", data["website_evidence"])
         self.assertEqual(
             data["website_evidence"]["report_navigation_used"],
             "direct_route_open_after_entry",

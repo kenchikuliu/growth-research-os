@@ -14,6 +14,7 @@ import google_trends
 import guided_flow
 import run_demand_workflow
 import capture_bundle
+import page_artifacts
 import render_report
 
 
@@ -174,6 +175,76 @@ class DemandWorkflowHeuristicsTests(unittest.TestCase):
         self.assertIn("page_blueprint", first_page)
         self.assertIn("comparison_table_dimensions", first_page["page_blueprint"])
         self.assertIn("recommended_h2", first_page["page_blueprint"])
+
+    def test_page_artifacts_generate_publishable_comparison_page_json(self) -> None:
+        workflow = {
+            "input": {"query": "ahrefs alternative"},
+            "decision": {"recommended_action": "ship_cluster"},
+            "report": {
+                "core_conclusion": "建议先做对比页。",
+                "first_batch_of_pages": [
+                    {
+                        "working_title": "ahrefs alternative",
+                        "page_type": "对比页",
+                        "primary_intent": "替代方案比较",
+                        "primary_keyword": "ahrefs alternative",
+                        "hero_primary_cta": "马上注册",
+                        "page_blueprint": {
+                            "title_formula": "ahrefs Alternative：为什么很多用户选择你的品牌",
+                            "recommended_h2": "ahrefs vs 你的品牌：Comparison",
+                            "comparison_table_dimensions": ["价格", "功能", "适用场景"],
+                            "fit_section_rule": "只写具体适合谁",
+                            "seo_notes": ["comparison pages"],
+                        },
+                    }
+                ],
+            },
+            "knowledge": {"gefei": {"summary": "不要只交关键词列表"}},
+            "derived": {
+                "page_signal_summary": "Semrush / Similarweb 页级证据已到位。",
+                "keyword_signal_summary": "Similarweb 非品牌关键词 5 条，付费落地页 3 条。",
+            },
+            "evidence": {
+                "trends": {"summary": {"primary_shape": "rising"}},
+                "tool_capture": {
+                    "results": {
+                        "semrush": {"data": {"top_pages": [{}, {}], "top_organic_keywords": [{}, {}, {}]}},
+                        "similarweb": {
+                            "data": {
+                                "website_evidence": {
+                                    "website_content": {"summary": {"rows": [{}, {}]}},
+                                    "search_overview": {
+                                        "top_non_brand_keywords": {"rows": [{}, {}, {}, {}, {}]},
+                                        "paid_landing_pages": {"rows": [{}, {}, {}]},
+                                    },
+                                    "home_signals": {
+                                        "priority_alerts": [{"metric": "landing_pages"}, {"metric": "keywords"}]
+                                    },
+                                }
+                            }
+                        },
+                    }
+                },
+            },
+        }
+
+        artifacts = page_artifacts.build_page_artifacts(
+            workflow,
+            brand_context=page_artifacts.brand_context_payload(
+                brand_name="Demand Validation OS",
+                brand_url="https://example.com",
+                primary_cta_url="https://example.com/signup",
+            ),
+        )
+
+        self.assertTrue(artifacts["available"])
+        first = artifacts["pages"][0]["page_json"]
+        self.assertEqual(first["hero"]["primary_cta"]["label"], "马上注册")
+        self.assertEqual(first["hero"]["primary_cta"]["url"], "https://example.com/signup")
+        self.assertEqual(first["comparison_section"]["heading"], "ahrefs vs 你的品牌：Comparison")
+        self.assertEqual(first["direct_answers"][0]["question"], "为什么你是这个竞品的替代方案")
+        self.assertTrue(first["comparison_section"]["rows"])
+        self.assertIn("价格", [row["dimension"] for row in first["comparison_section"]["rows"]])
 
     def test_demand_raw_scores_reward_complete_evidence(self) -> None:
         trends = {
@@ -410,6 +481,7 @@ class BuildWorkflowOrchestrationTests(unittest.TestCase):
         original_demand_report = run_demand_workflow.demand_report
         original_build_guided_flow = guided_flow.build_guided_flow
         original_build_method_alignment = run_demand_workflow.build_method_alignment
+        original_build_page_artifacts_payload = run_demand_workflow.build_page_artifacts_payload
 
         calls: list[str] = []
         fake_knowledge = {
@@ -472,6 +544,12 @@ class BuildWorkflowOrchestrationTests(unittest.TestCase):
             "chuhai": {"used": True},
             "web_cafe_simulator": {"used": True},
         }
+        fake_artifacts = {
+            "available": True,
+            "brand_context": {"brand_name": "BrandX"},
+            "page_count": 1,
+            "pages": [{"slug": "pdf-to-epub-alternative"}],
+        }
 
         try:
             def fake_knowledge_payload(mode: str, query: str) -> dict:
@@ -529,6 +607,12 @@ class BuildWorkflowOrchestrationTests(unittest.TestCase):
                 self.assertEqual(kwargs["guided"], fake_guided)
                 return fake_alignment
 
+            def fake_build_page_artifacts_payload(workflow: dict, **kwargs) -> dict:
+                calls.append("artifacts")
+                self.assertEqual(workflow["report"], fake_report)
+                self.assertEqual(kwargs["brand_name"], "")
+                return fake_artifacts
+
             run_demand_workflow.knowledge_payload = fake_knowledge_payload
             google_trends.collect = fake_collect
             run_demand_workflow.capture_bundle_payload = fake_capture_bundle_payload
@@ -537,6 +621,7 @@ class BuildWorkflowOrchestrationTests(unittest.TestCase):
             run_demand_workflow.demand_report = fake_demand_report
             guided_flow.build_guided_flow = fake_build_guided_flow
             run_demand_workflow.build_method_alignment = fake_build_method_alignment
+            run_demand_workflow.build_page_artifacts_payload = fake_build_page_artifacts_payload
 
             workflow = run_demand_workflow.build_workflow(
                 mode="demand",
@@ -556,13 +641,15 @@ class BuildWorkflowOrchestrationTests(unittest.TestCase):
             run_demand_workflow.demand_report = original_demand_report
             guided_flow.build_guided_flow = original_build_guided_flow
             run_demand_workflow.build_method_alignment = original_build_method_alignment
+            run_demand_workflow.build_page_artifacts_payload = original_build_page_artifacts_payload
 
         self.assertEqual(
             calls,
-            ["knowledge", "trends", "bundle", "raw_scores", "scorecard", "report", "guided_flow", "method_alignment"],
+            ["knowledge", "trends", "bundle", "raw_scores", "scorecard", "report", "guided_flow", "method_alignment", "artifacts"],
         )
         self.assertEqual(workflow["guided_flow"], fake_guided)
         self.assertEqual(workflow["method_alignment"], fake_alignment)
+        self.assertEqual(workflow["artifacts"]["page_artifacts"], fake_artifacts)
         self.assertEqual(workflow["decision"]["band"], "ship_cluster")
         self.assertEqual(workflow["report"], fake_report)
 

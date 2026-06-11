@@ -74,10 +74,11 @@ Current state:
 - `Semrush` now retries the overview route once if the first pass returns no RPC payloads.
 - `Semrush` and `Similarweb` now auto-detect 3ue daily-limit pages and can rotate to another configured node before retrying.
 - `Similarweb` now survives more 3ue shell half-load cases and can still emit activation-home priority-alert signals even when deeper routes are fragile.
-- `Similarweb` still has partial gaps for landing-pages style report automation; `网站表现` / website-performance is the stable captured baseline, with structured JSON plus node-switch telemetry.
+- `Similarweb` still has partial gaps for the deepest landing-pages style report automation, but it now emits structured `keyword_research` and `landing_pages_research` layers on top of `网站表现` / website-performance, `网站内容`, `搜索概况`, quick-search seeds, route candidates, and priority alerts.
 - `capture_bundle.py` is the preferred way to run both tools together because it executes them serially and avoids cross-session interference from parallel browser-backed runs.
 - `google_trends.py` now tries official Google Trends first, then can fall back to configured RapidAPI or DataForSEO providers, while keeping a normalized `30d / 90d / 12m / 5y` output shape and recording `provider_attempts`.
 - `run_demand_workflow.py` is the one-click orchestrator that combines gefei, chuhai, Google Trends, Similarweb, Semrush, scorecard logic, and a staged guided-flow layer.
+- `page_artifacts.py` plus `run_demand_workflow.py -> artifacts.page_artifacts` push the workflow one step further into publishable page JSON, especially for `alternative / comparison / versus` pages with direct-answer copy, CTA, fit-for blocks, and comparison-table structure.
 
 ```
 /demand-validation-os

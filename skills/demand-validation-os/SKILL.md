@@ -113,6 +113,7 @@ When the inferred page type is `对比页`, `alternative`, `vs`, or `comparison`
 - a concrete `适合谁` section rule
 
 Use [references/output-templates.md](references/output-templates.md) for the exact comparison-page structure.
+Then use `scripts/page_artifacts.py` or the built-in workflow `artifacts.page_artifacts` output to turn that blueprint into page-level copy and JSON.
 
 ## Evidence Rules
 
@@ -227,6 +228,21 @@ Current limitation:
 - landing-pages and some deeper report families are still more session-sensitive than Semrush
 - if a deeper report cannot be reached, the script still emits useful `account_state` and route evidence instead of pretending a report was reached
 
+Deeper capture layers now exposed in JSON:
+
+- `website_content_top_pages`
+- `keyword_research`
+- `landing_pages_research`
+
+These layers group:
+
+- `自然搜索 / 付费搜索` route candidates
+- quick-search keyword seeds
+- Similarweb top non-brand keyword rows
+- paid landing page rows
+- website-content folders and 热门页面 / PopularPages attempts
+- priority alerts for `Organic keywords` and `Organic landing pages`
+
 ### Serial Bundle Capture
 
 Use when you want both tools in one run and do not want parallel browser sessions interfering with each other:
@@ -290,6 +306,18 @@ This runner:
 - runs 3ue-backed `capture_bundle.py` when a domain is available
 - computes the scorecard
 - emits a guided `web.cafe`-style staged flow in the final JSON
+- emits `artifacts.page_artifacts` so comparison / alternative pages can move from blueprint to publishable page JSON
+
+If you only need the page-output layer from an existing workflow JSON:
+
+```bash
+python3 scripts/page_artifacts.py \
+  --workflow-input /tmp/ai-image-generator-workflow.json \
+  --brand-name "Your Brand" \
+  --brand-url "https://example.com" \
+  --primary-cta-url "https://example.com/signup" \
+  --output /tmp/ai-image-generator-page-artifacts.json
+```
 
 ## Google Trends Script
 
