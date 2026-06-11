@@ -45,6 +45,7 @@ When you need script-generated evidence from 3ue-backed accounts, use:
 
 - `scripts/capture_semrush.py`
 - `scripts/capture_similarweb.py`
+- `scripts/capture_api.py`
 - `scripts/capture_bundle.py`
 
 These scripts now:
@@ -243,6 +244,25 @@ These layers group:
 - website-content folders and 热门页面 / PopularPages attempts
 - priority alerts for `Organic keywords` and `Organic landing pages`
 
+### Unified Capture API
+
+Use when you want one stable entrypoint that later scale / skill code can call directly.
+
+```bash
+export THREEUE_USERNAME='...'
+export THREEUE_PASSWORD='...'
+python3 scripts/capture_api.py \
+  --query crazygames.com \
+  --output /tmp/crazygames-capture-api.json
+```
+
+Current behavior:
+
+- is the preferred API/CLI for downstream scale or skill calls
+- enforces `single_device`, `single_browser`, `single_active_page`, `serial`
+- collapses non-active tabs after 3ue opens a tool page so one live browser stays on one page
+- returns both per-attempt telemetry and per-tool structured JSON under one envelope
+
 ### Serial Bundle Capture
 
 Use when you want both tools in one run and do not want parallel browser sessions interfering with each other:
@@ -261,7 +281,7 @@ Current behavior:
 - records per-attempt runtime, quality, and failure metadata
 - retries `similarweb` once by default if the first attempt does not reach the core report layer
 - returns a combined JSON bundle under `results.semrush.data` and `results.similarweb.data`
-- is the preferred entry point when you need both captures together
+- is a backward-compatible wrapper around `capture_api.py`
 
 ## Scorecards
 

@@ -201,6 +201,12 @@ class BrowseClient:
     def tab_switch(self, index: int) -> Any:
         return self.run("tab_switch", str(index), timeout=15)
 
+    def tab_close(self, index: int | None = None) -> Any:
+        args = ["tab_close"]
+        if index is not None:
+            args.append(str(index))
+        return self.run(*args, timeout=15)
+
     def click(self, ref: str, timeout: int = 20) -> Any:
         return self.run("click", ref, timeout=timeout)
 
@@ -319,6 +325,65 @@ class ThreeUEExecutor:
 
     def stop(self) -> None:
         self.browser.stop(ignore_errors=True)
+
+    def collapse_to_active_page(self) -> dict[str, Any]:
+        pages = self.browser.pages()
+        closed_pages: list[dict[str, Any]] = []
+        current_url = self.browser.try_current_url(timeout=10)
+        active_index = None
+        for page in pages:
+            if page.get("url") == current_url:
+                try:
+                    active_index = int(page.get("index"))
+                except (TypeError, ValueError):
+                    active_index = None
+                break
+        if active_index is None and pages:
+            try:
+                active_index = int(pages[-1].get("index"))
+            except (TypeError, ValueError):
+                active_index = len(pages) - 1
+
+        sortable_pages: list[dict[str, Any]] = []
+        for page in pages:
+            try:
+                page_index = int(page.get("index"))
+            except (TypeError, ValueError):
+                continue
+            sortable_pages.append({**page, "index": page_index})
+
+        for page in sorted(sortable_pages, key=lambda item: item["index"], reverse=True):
+            page_index = page["index"]
+            if active_index is not None and page_index == active_index:
+                continue
+            try:
+                self.browser.tab_close(page_index)
+                closed_pages.append({"index": page_index, "url": page.get("url")})
+            except BrowseError as exc:
+                closed_pages.append(
+                    {
+                        "index": page_index,
+                        "url": page.get("url"),
+                        "error": str(exc),
+                    }
+                )
+
+        remaining_pages = self.browser.pages()
+        active_page: dict[str, Any] = {}
+        refreshed_url = self.browser.try_current_url(timeout=10)
+        for page in remaining_pages:
+            if page.get("url") == refreshed_url:
+                active_page = page
+                break
+        if not active_page and remaining_pages:
+            active_page = remaining_pages[-1]
+
+        return {
+            "policy": "single_active_page",
+            "closed_pages": closed_pages,
+            "pages": remaining_pages,
+            "active": active_page,
+        }
 
     def _dashboard_state(self) -> dict[str, Any]:
         url = self.browser.current_url(timeout=10)
@@ -656,12 +721,16 @@ class ThreeUEExecutor:
                 pass
             pages = self.browser.pages()
         active = pages[target_index] if pages else {}
+        page_policy = self.collapse_to_active_page()
+        pages = page_policy.get("pages") or pages
+        active = page_policy.get("active") or active
         return {
             "result": result,
             "pages_before": pages_before,
             "pages": pages,
             "active_index": target_index,
             "active": active,
+            "page_policy": page_policy,
         }
 
 

@@ -14,6 +14,7 @@ import google_trends
 import guided_flow
 import run_demand_workflow
 import capture_bundle
+import capture_api
 import page_artifacts
 import render_report
 
@@ -373,6 +374,53 @@ class CaptureBundleQualityTests(unittest.TestCase):
         self.assertTrue(quality["core_ready"])
         self.assertEqual(quality["score"], 4)
         self.assertIn("paid-landing-pages-ready", quality["reasons"])
+
+    def test_capture_api_exposes_single_browser_single_page_policy(self) -> None:
+        original_run_capture_with_retries = capture_api.run_capture_with_retries
+        try:
+            def fake_run_capture_with_retries(**kwargs):
+                tool = kwargs["tool"]
+                return (
+                    {"tool": tool, "ok": True},
+                    [
+                        {
+                            "tool": tool,
+                            "session": f"dvos-{tool}-a1",
+                            "status": "ok",
+                            "quality": {"core_ready": True, "score": 3, "reasons": ["core-report-ready"]},
+                        }
+                    ],
+                    {
+                        "tool": tool,
+                        "session": f"dvos-{tool}-a1",
+                        "status": "ok",
+                        "quality": {"core_ready": True, "score": 3, "reasons": ["core-report-ready"]},
+                    },
+                )
+
+            capture_api.run_capture_with_retries = fake_run_capture_with_retries
+            plan = capture_api.run_capture_plan(
+                query="crazygames.com",
+                username="u",
+                password="p",
+                tools=["semrush", "similarweb"],
+                session_prefix="dvos-capture",
+                keep_session=False,
+                max_node_rotations=2,
+                continue_on_error=False,
+                request_id="req-1",
+            )
+        finally:
+            capture_api.run_capture_with_retries = original_run_capture_with_retries
+
+        policy = plan["execution_policy"]
+        self.assertEqual(policy["device_scope"], "single_device")
+        self.assertEqual(policy["browser_scope"], "single_browser")
+        self.assertEqual(policy["page_scope"], "single_active_page")
+        self.assertEqual(policy["run_mode"], "serial")
+        self.assertEqual(policy["tab_strategy"], "collapse_non_active_tabs_after_tool_open")
+        self.assertEqual(plan["summary"]["core_ready_tools"], ["semrush", "similarweb"])
+        self.assertTrue(plan["summary"]["all_succeeded"])
 
 
 class GuidedFlowTests(unittest.TestCase):
