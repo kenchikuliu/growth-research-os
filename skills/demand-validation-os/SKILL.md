@@ -300,6 +300,13 @@ Thin scale behavior:
 - `/scale/page-artifacts` returns `scale_output` plus `page_artifacts`
 - `scripts/run_scale.py` does the same locally, and also supports batch jobs via `--jobs-input`
 - `scripts/run_scale.py` accepts `json / csv / tsv / xlsx` batch inputs and can export flattened rows to `json / csv / tsv / xlsx` with `--table-output`
+- leaderboard-style filters are shared across CLI and HTTP scale calls:
+  - `min_score`
+  - `allowed_actions`
+  - `require_tools_ready`
+  - `sort_by`
+  - `ascending`
+  - `top`
 
 Example:
 
@@ -424,6 +431,8 @@ Current artifact behavior:
 - keeps the existing `page_json`
 - adds `frontend_payload` per page for direct renderer consumption
 - adds top-level `frontend_protocol` so frontend code can understand available page template types without guessing
+- `frontend_payload` now also includes explicit `blocks`, each with `id`, `type`, `required`, and `data`
+- `frontend_protocol` now publishes `block_types` so a renderer can validate available block families before render time
 
 ## Google Trends Script
 

@@ -164,6 +164,15 @@ Request body supports:
 - `primary_cta_url`
 - `primary_cta_label`
 - `request_id`
+- scale batch mode on `/scale` and `/scale/page-artifacts` also supports:
+  - `jobs`
+  - `include_workflow`
+  - `min_score`
+  - `allowed_actions`
+  - `require_tools_ready`
+  - `sort_by`
+  - `ascending`
+  - `top`
 
 Example request:
 
@@ -233,6 +242,27 @@ Example response shape for `POST /workflow/page-artifacts`:
 }
 ```
 
+Batch `POST /scale` or `POST /scale/page-artifacts` can also return:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "job_count": 1,
+    "filters": {
+      "min_score": 60,
+      "allowed_actions": ["ship_cluster", "ship_one_page"],
+      "require_tools_ready": ["semrush", "similarweb"],
+      "sort_by": "total_score",
+      "ascending": false,
+      "top": 5
+    },
+    "results": [],
+    "table_rows": []
+  }
+}
+```
+
 ## Thin Scale CLI
 
 `scripts/run_scale.py` is the local CLI mirror of the thin scale HTTP layer.
@@ -285,6 +315,13 @@ Tabular support:
 
 - `--jobs-input` supports `json / csv / tsv / xlsx`
 - `--table-output` supports `json / csv / tsv / xlsx`
+- leaderboard filter args:
+  - `--min-score`
+  - `--allowed-actions`
+  - `--require-tools-ready`
+  - `--sort-by`
+  - `--ascending`
+  - `--top`
 
 Typical flattened table columns:
 
@@ -485,7 +522,8 @@ Example:
   "page_count": 1,
   "frontend_protocol": {
     "version": "2026-06-11",
-    "page_template_types": ["comparison_page"]
+    "page_template_types": ["comparison_page"],
+    "block_types": ["comparison_table", "direct_answers", "evidence", "faq", "fit_for"]
   },
   "pages": [
     {
@@ -503,6 +541,18 @@ Example:
         "seo": {},
         "hero": {},
         "sections": [],
+        "blocks": [
+          {
+            "id": "comparison-table",
+            "type": "comparison_table",
+            "required": true,
+            "data": {
+              "heading": "ahrefs vs 你的品牌：Comparison",
+              "dimensions": ["价格", "功能", "适用场景"],
+              "rows": []
+            }
+          }
+        ],
         "navigation": {},
         "editorial": {},
         "source_context": {}
@@ -513,6 +563,7 @@ Example:
 ```
 
 Use `frontend_payload` when rendering pages in a frontend app. Use `page_json` when you still want the richer editorial shape.
+Use `frontend_payload.blocks` when you want a schema-stable render protocol instead of inferring section semantics from prose or section order.
 
 If a 3ue tool page shows a daily-limit wall such as `Daily usage limit reached`, the capture scripts should:
 

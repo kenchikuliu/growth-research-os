@@ -11,7 +11,7 @@ from typing import Any
 
 import run_demand_workflow
 import tabular_io
-from workflow_scale import build_scale_output
+from workflow_scale import build_scale_output, parse_csv_set, rank_filtered_pairs
 
 
 def read_jobs(path: str) -> list[dict[str, Any]]:
@@ -105,7 +105,6 @@ def flatten_scale_result(*, index: int | None, mode: str | None, query: str | No
         "artifact_slugs": " | ".join(slugs),
     }
 
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="Thin CLI over demand-validation workflow and page-artifact outputs.")
     parser.add_argument("--mode", choices=["demand", "attribution"])
@@ -124,8 +123,17 @@ def main() -> int:
     parser.add_argument("--jobs-input", help="Run a batch JSON array of workflow jobs")
     parser.add_argument("--include-workflow", action="store_true", help="Include full workflow JSON alongside scale output")
     parser.add_argument("--table-output", help="Write flattened scale rows to csv/tsv/xlsx/json")
+    parser.add_argument("--min-score", type=int, help="Keep only rows with total_score >= this value")
+    parser.add_argument("--allowed-actions", help="Comma-separated allowed recommended_action values")
+    parser.add_argument("--require-tools-ready", help="Comma-separated required ready tools, e.g. semrush,similarweb")
+    parser.add_argument("--sort-by", default="total_score", help="Flat leaderboard column to sort by")
+    parser.add_argument("--ascending", action="store_true", help="Sort ascending instead of descending")
+    parser.add_argument("--top", type=int, help="Keep only the top N rows after filtering and sorting")
     parser.add_argument("--output", help="Write JSON to a file")
     args = parser.parse_args()
+
+    allowed_actions = parse_csv_set(args.allowed_actions)
+    required_tools = parse_csv_set(args.require_tools_ready)
 
     if args.jobs_input:
         jobs = read_jobs(args.jobs_input)
@@ -144,8 +152,26 @@ def main() -> int:
                 }
             )
             flat_rows.append(flatten_scale_result(index=idx, mode=mode, query=query, result=result))
+        results, flat_rows = rank_filtered_pairs(
+            results,
+            flat_rows,
+            min_score=args.min_score,
+            allowed_actions=allowed_actions or None,
+            require_tools_ready=required_tools or None,
+            sort_by=args.sort_by,
+            ascending=args.ascending,
+            top=args.top,
+        )
         payload: dict[str, Any] = {
             "job_count": len(results),
+            "filters": {
+                "min_score": args.min_score,
+                "allowed_actions": sorted(allowed_actions),
+                "require_tools_ready": sorted(required_tools),
+                "sort_by": args.sort_by,
+                "ascending": args.ascending,
+                "top": args.top,
+            },
             "results": results,
         }
     else:

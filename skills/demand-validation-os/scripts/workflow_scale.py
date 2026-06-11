@@ -6,6 +6,22 @@ from __future__ import annotations
 from typing import Any
 
 
+def parse_csv_set(value: str | None) -> set[str]:
+    if not value:
+        return set()
+    return {item.strip() for item in str(value).split(",") if item.strip()}
+
+
+def normalize_sort_value(value: Any) -> tuple[int, Any]:
+    if value is None or value == "":
+        return (1, "")
+    if isinstance(value, bool):
+        return (0, int(value))
+    if isinstance(value, (int, float)):
+        return (0, value)
+    return (0, str(value).lower())
+
+
 def build_scale_output(workflow: dict[str, Any]) -> dict[str, Any]:
     report = workflow.get("report") or {}
     decision = workflow.get("decision") or {}
@@ -45,3 +61,63 @@ def build_scale_output(workflow: dict[str, Any]) -> dict[str, Any]:
         "artifacts": artifacts,
     }
 
+
+def passes_filters(
+    scale_output: dict[str, Any],
+    *,
+    min_score: int | None = None,
+    allowed_actions: set[str] | None = None,
+    require_tools_ready: set[str] | None = None,
+) -> bool:
+    decision = scale_output.get("decision") or {}
+    snapshot = scale_output.get("normalized_snapshot") or {}
+    score = decision.get("total_score")
+    if min_score is not None and isinstance(score, (int, float)) and score < min_score:
+        return False
+    if min_score is not None and not isinstance(score, (int, float)):
+        return False
+    if allowed_actions and (decision.get("recommended_action") not in allowed_actions):
+        return False
+    if require_tools_ready:
+        tools_ready = set(snapshot.get("tools_ready") or [])
+        if not require_tools_ready.issubset(tools_ready):
+            return False
+    return True
+
+
+def sort_scale_rows(rows: list[dict[str, Any]], *, sort_by: str = "total_score", descending: bool = True) -> list[dict[str, Any]]:
+    return sorted(
+        rows,
+        key=lambda row: normalize_sort_value(row.get(sort_by)),
+        reverse=descending,
+    )
+
+
+def rank_filtered_pairs(
+    result_rows: list[dict[str, Any]],
+    flat_rows: list[dict[str, Any]],
+    *,
+    min_score: int | None = None,
+    allowed_actions: set[str] | None = None,
+    require_tools_ready: set[str] | None = None,
+    sort_by: str = "total_score",
+    ascending: bool = False,
+    top: int | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    filtered_pairs = [
+        (result_row, flat_row)
+        for result_row, flat_row in zip(result_rows, flat_rows)
+        if passes_filters(
+            (result_row.get("scale_output") or {}),
+            min_score=min_score,
+            allowed_actions=allowed_actions or None,
+            require_tools_ready=require_tools_ready or None,
+        )
+    ]
+    filtered_flat_rows = [pair[1] for pair in filtered_pairs]
+    sorted_flat_rows = sort_scale_rows(filtered_flat_rows, sort_by=sort_by, descending=not ascending)
+    order = {id(row): idx for idx, row in enumerate(sorted_flat_rows)}
+    filtered_pairs = sorted(filtered_pairs, key=lambda pair: order[id(pair[1])])
+    if top:
+        filtered_pairs = filtered_pairs[:top]
+    return [pair[0] for pair in filtered_pairs], [pair[1] for pair in filtered_pairs]

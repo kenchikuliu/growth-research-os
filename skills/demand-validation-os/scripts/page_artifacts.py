@@ -425,6 +425,56 @@ def build_frontend_payload(
     evidence = page_json.get("evidence_section") or {}
     faq = page_json.get("faq") or []
     editorial = page_json.get("editorial_notes") or {}
+    blocks = [
+        {
+            "id": "direct-answers",
+            "type": "direct_answers",
+            "required": kind == "comparison_page",
+            "data": {
+                "heading": "直接回答三个问题",
+                "items": direct_answers,
+            },
+        },
+        {
+            "id": "fit-for",
+            "type": "fit_for",
+            "required": kind == "comparison_page",
+            "data": {
+                "heading": "更适合谁",
+                "items": fit_for,
+            },
+        },
+        {
+            "id": "comparison-table",
+            "type": "comparison_table",
+            "required": kind == "comparison_page",
+            "data": {
+                "heading": comparison.get("heading"),
+                "dimensions": comparison.get("table_dimensions") or [],
+                "rows": comparison.get("rows") or [],
+            },
+        },
+        {
+            "id": "evidence",
+            "type": "evidence",
+            "required": True,
+            "data": {
+                "heading": evidence.get("heading") or "证据",
+                "proof_points": evidence.get("proof_points") or page_json.get("proof_points") or [],
+                "page_signal_summary": evidence.get("page_signal_summary") or page_json.get("evidence_basis") or "",
+                "keyword_signal_summary": evidence.get("keyword_signal_summary") or "",
+            },
+        },
+        {
+            "id": "faq",
+            "type": "faq",
+            "required": kind == "comparison_page",
+            "data": {
+                "heading": "常见问题",
+                "items": faq,
+            },
+        },
+    ]
     return {
         "version": "2026-06-11",
         "template": kind,
@@ -446,34 +496,12 @@ def build_frontend_payload(
         },
         "sections": [
             {
-                "type": "direct_answers",
-                "heading": "直接回答三个问题",
-                "items": direct_answers,
-            },
-            {
-                "type": "fit_for",
-                "heading": "更适合谁",
-                "items": fit_for,
-            },
-            {
-                "type": "comparison_table",
-                "heading": comparison.get("heading"),
-                "dimensions": comparison.get("table_dimensions") or [],
-                "rows": comparison.get("rows") or [],
-            },
-            {
-                "type": "evidence",
-                "heading": evidence.get("heading") or "证据",
-                "proof_points": evidence.get("proof_points") or page_json.get("proof_points") or [],
-                "page_signal_summary": evidence.get("page_signal_summary") or page_json.get("evidence_basis") or "",
-                "keyword_signal_summary": evidence.get("keyword_signal_summary") or "",
-            },
-            {
-                "type": "faq",
-                "heading": "常见问题",
-                "items": faq,
-            },
+                "type": block["type"],
+                **block["data"],
+            }
+            for block in blocks
         ],
+        "blocks": blocks,
         "navigation": {
             "internal_links": page_json.get("internal_links") or [],
         },
@@ -507,6 +535,14 @@ def build_page_artifacts(workflow: dict[str, Any], brand_context: dict[str, str]
         "frontend_protocol": {
             "version": "2026-06-11",
             "page_template_types": sorted({artifact.get("kind") for artifact in artifacts if artifact.get("kind")}),
+            "block_types": sorted(
+                {
+                    block.get("type")
+                    for artifact in artifacts
+                    for block in ((artifact.get("frontend_payload") or {}).get("blocks") or [])
+                    if block.get("type")
+                }
+            ),
         },
     }
 

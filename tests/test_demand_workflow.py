@@ -261,6 +261,8 @@ class DemandWorkflowHeuristicsTests(unittest.TestCase):
         self.assertEqual(frontend["route"]["slug"], "ahrefs-alternative")
         self.assertEqual(frontend["hero"]["primary_cta"]["url"], "https://example.com/signup")
         self.assertEqual(frontend["sections"][2]["type"], "comparison_table")
+        self.assertEqual(frontend["blocks"][0]["id"], "direct-answers")
+        self.assertTrue(frontend["blocks"][0]["required"])
 
     def test_demand_raw_scores_reward_complete_evidence(self) -> None:
         trends = {
@@ -1198,6 +1200,7 @@ class NormalizedArtifactTests(unittest.TestCase):
         artifacts = page_artifacts.build_page_artifacts(workflow)
         self.assertEqual(artifacts["frontend_protocol"]["version"], "2026-06-11")
         self.assertIn("comparison_page", artifacts["frontend_protocol"]["page_template_types"])
+        self.assertIn("comparison_table", artifacts["frontend_protocol"]["block_types"])
 
 
 class WorkflowServiceTests(unittest.TestCase):
@@ -1323,6 +1326,105 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertEqual(payload["data"]["scale_output"]["decision"]["band"], "solid_attribution")
         self.assertEqual(payload["data"]["scale_output"]["normalized_snapshot"]["top_keyword_count"], 2)
 
+    def test_workflow_service_scale_batch_filters_and_sorts(self) -> None:
+        original_build_workflow = workflow_service.run_demand_workflow.build_workflow
+        try:
+            def fake_build_workflow(**kwargs: object) -> dict[str, object]:
+                query = str(kwargs["query"])
+                scores = {"q1": 55, "q2": 82, "q3": 70}
+                actions = {"q1": "watch", "q2": "ship_cluster", "q3": "ship_one_page"}
+                tools_ready = {
+                    "q1": ["semrush"],
+                    "q2": ["semrush", "similarweb"],
+                    "q3": ["semrush", "similarweb"],
+                }
+                return {
+                    "mode": kwargs["mode"],
+                    "input": {"query": query, "domain": kwargs["domain"]},
+                    "decision": {
+                        "band": actions[query],
+                        "recommended_action": actions[query],
+                        "total_score": scores[query],
+                        "all_hard_gates_passed": True,
+                    },
+                    "report": {"core_conclusion": f"{query} ok", "first_batch_of_pages": []},
+                    "evidence": {
+                        "tool_capture": {
+                            "normalized": {
+                                "tools_ready": tools_ready[query],
+                                "top_pages": [],
+                                "top_keywords": [],
+                                "landing_pages": [],
+                                "page_clusters": [],
+                            }
+                        }
+                    },
+                    "artifacts": {"page_artifacts": {"available": False, "page_count": 0, "pages": []}},
+                }
+
+            workflow_service.run_demand_workflow.build_workflow = fake_build_workflow
+            server = workflow_service.build_server("127.0.0.1", 0)
+            port = server.server_address[1]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                req = Request(
+                    f"http://127.0.0.1:{port}/scale",
+                    data=json.dumps(
+                        {
+                            "jobs": [
+                                {"mode": "demand", "query": "q1", "bundle_payload": {"results": {}, "summary": {}, "normalized": {}}},
+                                {"mode": "demand", "query": "q2", "bundle_payload": {"results": {}, "summary": {}, "normalized": {}}},
+                                {"mode": "demand", "query": "q3", "bundle_payload": {"results": {}, "summary": {}, "normalized": {}}},
+                            ],
+                            "min_score": 60,
+                            "allowed_actions": "ship_cluster,ship_one_page",
+                            "require_tools_ready": "semrush,similarweb",
+                            "sort_by": "total_score",
+                            "top": 1,
+                        }
+                    ).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urlopen(req, timeout=5) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+        finally:
+            workflow_service.run_demand_workflow.build_workflow = original_build_workflow
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["data"]["job_count"], 1)
+        self.assertEqual(payload["data"]["results"][0]["query"], "q2")
+        self.assertEqual(payload["data"]["table_rows"][0]["query"], "q2")
+        self.assertEqual(payload["data"]["filters"]["require_tools_ready"], ["semrush", "similarweb"])
+
+    def test_workflow_service_workflow_endpoint_rejects_batch_jobs(self) -> None:
+        server = workflow_service.build_server("127.0.0.1", 0)
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            req = Request(
+                f"http://127.0.0.1:{port}/workflow",
+                data=json.dumps({"jobs": [{"mode": "demand", "query": "q1"}]}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with self.assertRaises(HTTPError) as exc_ctx:
+                urlopen(req, timeout=5)
+            payload = json.loads(exc_ctx.exception.read().decode("utf-8"))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        self.assertEqual(exc_ctx.exception.code, 400)
+        self.assertEqual(payload["error"]["code"], "invalid_payload")
+
 
 class WorkflowScaleTests(unittest.TestCase):
     def test_build_scale_output_summarizes_workflow(self) -> None:
@@ -1360,6 +1462,24 @@ class WorkflowScaleTests(unittest.TestCase):
         self.assertEqual(scale["decision"]["recommended_action"], "ship_cluster")
         self.assertEqual(scale["normalized_snapshot"]["top_page_count"], 2)
         self.assertTrue(scale["page_plan"]["artifacts_available"])
+
+    def test_workflow_scale_filters_and_sort_rows(self) -> None:
+        rows = [
+            {"query": "q1", "total_score": 55, "recommended_action": "watch"},
+            {"query": "q2", "total_score": 82, "recommended_action": "ship_cluster"},
+            {"query": "q3", "total_score": 70, "recommended_action": "ship_one_page"},
+        ]
+        sorted_rows = workflow_scale.sort_scale_rows(rows, sort_by="total_score", descending=True)
+        self.assertEqual(sorted_rows[0]["query"], "q2")
+        self.assertEqual(sorted_rows[-1]["query"], "q1")
+        self.assertTrue(
+            workflow_scale.passes_filters(
+                {"decision": {"total_score": 82, "recommended_action": "ship_cluster"}, "normalized_snapshot": {"tools_ready": ["semrush", "similarweb"]}},
+                min_score=80,
+                allowed_actions={"ship_cluster"},
+                require_tools_ready={"semrush"},
+            )
+        )
 
 
 class RunScaleCliTests(unittest.TestCase):
@@ -1446,6 +1566,51 @@ class RunScaleCliTests(unittest.TestCase):
             output_path.unlink(missing_ok=True)
         self.assertIn("recommended_action", written)
         self.assertIn("ship_cluster", written)
+
+    def test_run_scale_leaderboard_filters_sort_and_top(self) -> None:
+        results = [
+            {
+                "index": 1,
+                "scale_output": {
+                    "decision": {"total_score": 55, "recommended_action": "watch"},
+                    "normalized_snapshot": {"tools_ready": ["semrush"]},
+                },
+            },
+            {
+                "index": 2,
+                "scale_output": {
+                    "decision": {"total_score": 82, "recommended_action": "ship_cluster"},
+                    "normalized_snapshot": {"tools_ready": ["semrush", "similarweb"]},
+                },
+            },
+            {
+                "index": 3,
+                "scale_output": {
+                    "decision": {"total_score": 70, "recommended_action": "ship_one_page"},
+                    "normalized_snapshot": {"tools_ready": ["semrush", "similarweb"]},
+                },
+            },
+        ]
+        flat_rows = [
+            {"index": 1, "query": "q1", "total_score": 55},
+            {"index": 2, "query": "q2", "total_score": 82},
+            {"index": 3, "query": "q3", "total_score": 70},
+        ]
+        allowed_actions = run_scale.parse_csv_set("ship_cluster,ship_one_page")
+        required_tools = run_scale.parse_csv_set("semrush,similarweb")
+        filtered_pairs = [
+            (result_row, flat_row)
+            for result_row, flat_row in zip(results, flat_rows)
+            if workflow_scale.passes_filters(
+                result_row["scale_output"],
+                min_score=60,
+                allowed_actions=allowed_actions,
+                require_tools_ready=required_tools,
+            )
+        ]
+        sorted_flat_rows = workflow_scale.sort_scale_rows([pair[1] for pair in filtered_pairs], sort_by="total_score", descending=True)
+        self.assertEqual(sorted_flat_rows[0]["query"], "q2")
+        self.assertEqual(len(filtered_pairs), 2)
 
 
 class TabularIoTests(unittest.TestCase):

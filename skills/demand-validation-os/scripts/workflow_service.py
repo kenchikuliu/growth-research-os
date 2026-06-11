@@ -15,7 +15,7 @@ from urllib.parse import parse_qs, urlparse
 
 import run_demand_workflow
 from browser_capture import iso_utc_now
-from workflow_scale import build_scale_output
+from workflow_scale import build_scale_output, parse_csv_set, rank_filtered_pairs
 
 
 SERVICE_NAME = "demand-validation-os.workflow_service"
@@ -109,6 +109,115 @@ def build_workflow_kwargs(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def compact_result(result: dict[str, Any], include_workflow: bool) -> dict[str, Any]:
+    if include_workflow:
+        return result
+    return {
+        "scale_output": result.get("scale_output") or {},
+        "page_artifacts": result.get("page_artifacts") or {},
+    }
+
+
+def flatten_scale_result(*, index: int | None, mode: str | None, query: str | None, result: dict[str, Any]) -> dict[str, Any]:
+    scale_output = result.get("scale_output") or {}
+    decision = scale_output.get("decision") or {}
+    direct_answer = scale_output.get("direct_answer") or {}
+    page_plan = scale_output.get("page_plan") or {}
+    normalized_snapshot = scale_output.get("normalized_snapshot") or {}
+    page_artifacts = result.get("page_artifacts") or {}
+    first_pages = page_plan.get("first_batch_of_pages") or []
+    slugs = [page.get("slug") for page in (page_artifacts.get("pages") or []) if isinstance(page, dict) and page.get("slug")]
+    return {
+        "index": index if index is not None else "",
+        "mode": mode or scale_output.get("mode") or "",
+        "query": query or scale_output.get("query") or "",
+        "domain": scale_output.get("domain") or "",
+        "band": decision.get("band") or "",
+        "recommended_action": decision.get("recommended_action") or "",
+        "total_score": decision.get("total_score") or "",
+        "all_hard_gates_passed": decision.get("all_hard_gates_passed"),
+        "core_conclusion": direct_answer.get("core_conclusion") or "",
+        "page_type_recommendation": direct_answer.get("page_type_recommendation") or "",
+        "tools_ready": ",".join(normalized_snapshot.get("tools_ready") or []),
+        "top_page_count": normalized_snapshot.get("top_page_count") or 0,
+        "top_keyword_count": normalized_snapshot.get("top_keyword_count") or 0,
+        "landing_page_count": normalized_snapshot.get("landing_page_count") or 0,
+        "page_cluster_count": normalized_snapshot.get("page_cluster_count") or 0,
+        "page_artifact_count": page_plan.get("page_artifact_count") or 0,
+        "artifacts_available": page_plan.get("artifacts_available"),
+        "first_page_titles": " | ".join(
+            page.get("working_title") or page.get("primary_keyword") or ""
+            for page in first_pages
+            if isinstance(page, dict)
+        ),
+        "artifact_slugs": " | ".join(slugs),
+    }
+
+
+def run_workflow_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    kwargs = build_workflow_kwargs(payload)
+    workflow = run_demand_workflow.build_workflow(**kwargs)
+    scale_output = build_scale_output(workflow)
+    return {
+        "workflow": workflow,
+        "scale_output": scale_output,
+        "page_artifacts": scale_output.get("artifacts") or {},
+    }
+
+
+def build_scale_batch_response(payload: dict[str, Any]) -> dict[str, Any]:
+    jobs = payload.get("jobs")
+    include_workflow = bool(payload.get("include_workflow"))
+    if not isinstance(jobs, list) or not jobs:
+        raise ValueError("scale batch requests must include a non-empty 'jobs' array.")
+
+    results = []
+    flat_rows = []
+    for idx, job in enumerate(jobs, start=1):
+        if not isinstance(job, dict):
+            raise ValueError("Each job in 'jobs' must be an object.")
+        merged_job = {**payload, **job}
+        merged_job.pop("jobs", None)
+        result = run_workflow_from_payload(merged_job)
+        mode = merged_job.get("mode")
+        query = merged_job.get("query")
+        results.append(
+            {
+                "index": idx,
+                "mode": mode,
+                "query": query,
+                **compact_result(result, include_workflow),
+            }
+        )
+        flat_rows.append(flatten_scale_result(index=idx, mode=mode, query=query, result=result))
+
+    allowed_actions = parse_csv_set(payload.get("allowed_actions"))
+    required_tools = parse_csv_set(payload.get("require_tools_ready"))
+    results, flat_rows = rank_filtered_pairs(
+        results,
+        flat_rows,
+        min_score=payload.get("min_score"),
+        allowed_actions=allowed_actions or None,
+        require_tools_ready=required_tools or None,
+        sort_by=(payload.get("sort_by") or "total_score"),
+        ascending=bool(payload.get("ascending")),
+        top=payload.get("top"),
+    )
+    return {
+        "job_count": len(results),
+        "filters": {
+            "min_score": payload.get("min_score"),
+            "allowed_actions": sorted(allowed_actions),
+            "require_tools_ready": sorted(required_tools),
+            "sort_by": payload.get("sort_by") or "total_score",
+            "ascending": bool(payload.get("ascending")),
+            "top": payload.get("top"),
+        },
+        "results": results,
+        "table_rows": flat_rows,
+    }
+
+
 class WorkflowServiceHandler(BaseHTTPRequestHandler):
     server_version = "WorkflowService/1.0"
     protocol_version = "HTTP/1.1"
@@ -184,6 +293,16 @@ class WorkflowServiceHandler(BaseHTTPRequestHandler):
             self.write_json(status, error_payload)
             return
 
+        if parsed.path.startswith("/workflow") and isinstance(payload.get("jobs"), list):
+            status, error_payload = make_error(
+                status=HTTPStatus.BAD_REQUEST,
+                code="invalid_payload",
+                message="Batch jobs are only supported on /scale and /scale/page-artifacts.",
+                request_id=request_id,
+            )
+            self.write_json(status, error_payload)
+            return
+
         if not WORKFLOW_LOCK.acquire(blocking=False):
             status, error_payload = make_error(
                 status=HTTPStatus.CONFLICT,
@@ -195,28 +314,32 @@ class WorkflowServiceHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            kwargs = build_workflow_kwargs(payload)
-            workflow = run_demand_workflow.build_workflow(**kwargs)
-            if parsed.path == "/workflow/page-artifacts":
-                data = {
-                    "workflow_summary": build_scale_output(workflow),
-                    "page_artifacts": (workflow.get("artifacts") or {}).get("page_artifacts") or {},
-                }
-            elif parsed.path == "/scale/page-artifacts":
-                scale_output = build_scale_output(workflow)
-                data = {
-                    "scale_output": scale_output,
-                    "page_artifacts": scale_output.get("artifacts") or {},
-                }
-            elif parsed.path == "/scale":
-                data = {
-                    "scale_output": build_scale_output(workflow),
-                }
+            if parsed.path.startswith("/scale") and isinstance(payload.get("jobs"), list):
+                data = build_scale_batch_response(payload)
             else:
-                data = {
-                    "workflow": workflow,
-                    "scale_output": build_scale_output(workflow),
-                }
+                result = run_workflow_from_payload(payload)
+                workflow = result["workflow"]
+                scale_output = result["scale_output"]
+                page_artifacts = result["page_artifacts"]
+                if parsed.path == "/workflow/page-artifacts":
+                    data = {
+                        "workflow_summary": scale_output,
+                        "page_artifacts": page_artifacts,
+                    }
+                elif parsed.path == "/scale/page-artifacts":
+                    data = {
+                        "scale_output": scale_output,
+                        "page_artifacts": page_artifacts,
+                    }
+                elif parsed.path == "/scale":
+                    data = {
+                        "scale_output": scale_output,
+                    }
+                else:
+                    data = {
+                        "workflow": workflow,
+                        "scale_output": scale_output,
+                    }
             response = {
                 **response_meta(request_id),
                 "ok": True,
