@@ -167,6 +167,11 @@ Request body supports:
 - `primary_cta_label`
 - `kd_input`
 - `kd_score`
+- `kd_live`
+- `kd_gl`
+- `kd_hl`
+- `kd_force`
+- `kd_token`
 - `request_id`
 - scale batch mode on `/scale` and `/scale/page-artifacts` also supports:
   - `jobs`
@@ -195,8 +200,9 @@ Example request:
 }
 ```
 
-`kd_score` and `kd_input` are the lightweight adapter fields for `https://seo.web.cafe/kd/`.
-Use them as a public directional difficulty hint, not as a replacement for Semrush / Similarweb page-level evidence.
+`kd_score` and `kd_input` remain the fallback adapter fields for `https://seo.web.cafe/kd/`.
+By default the workflow can now fetch live KD through the public page token plus `https://seo.web.cafe/kd/api/kd`.
+Use KD as a public directional difficulty hint, not as a replacement for Semrush / Similarweb page-level evidence.
 
 Example response shape for `POST /workflow/page-artifacts`:
 

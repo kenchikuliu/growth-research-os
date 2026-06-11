@@ -108,6 +108,11 @@ def build_workflow_kwargs(payload: dict[str, Any]) -> dict[str, Any]:
         "trends_input": payload.get("trends_input") or None,
         "kd_input": payload.get("kd_input") or None,
         "kd_score": payload.get("kd_score"),
+        "kd_live": payload.get("kd_live", True),
+        "kd_gl": (payload.get("kd_gl") or "us").strip() or "us",
+        "kd_hl": (payload.get("kd_hl") or "en").strip() or "en",
+        "kd_force": bool(payload.get("kd_force")),
+        "kd_token": payload.get("kd_token") or None,
     }
 
 

@@ -160,7 +160,8 @@ This skill now includes script-level capture for the 3ue-backed Similarweb and S
 
 Read [references/capture-schema.md](references/capture-schema.md) before using the capture scripts so you know what JSON is guaranteed and what is best-effort.
 
-`scripts/web_cafe_kd.py` is the lightweight adapter for `https://seo.web.cafe/kd/`.
+`scripts/web_cafe_kd.py` is the live adapter for `https://seo.web.cafe/kd/`.
+It now fetches a page-scoped `kd-token` from the public KD page and calls the site-local `api/kd` endpoint automatically.
 Use it when you want a directional difficulty signal without pretending it replaces Semrush or Similarweb.
 
 ### Shared Browser Executor

@@ -27,7 +27,7 @@ Scores and diagnoses two SEO research jobs:
 
 Combines gefei, chuhai, Google Trends, Similarweb, and Semrush into one evidence-first output.
 
-Also supports a lightweight public difficulty hint from `https://seo.web.cafe/kd/`, exposed through `scripts/web_cafe_kd.py` and optional `kd_score / kd_input` workflow fields.
+Also supports a public difficulty hint from `https://seo.web.cafe/kd/`, exposed through `scripts/web_cafe_kd.py` and optional `kd_score / kd_input` workflow fields. The workflow now auto-fetches live KD by default through the page-token + `api/kd` path, with manual score and prebuilt JSON as fallback.
 
 Output:
 
@@ -96,14 +96,14 @@ python3 skills/demand-validation-os/scripts/google_trends.py \
 
 python3 skills/demand-validation-os/scripts/web_cafe_kd.py \
   --query "ahrefs alternative" \
-  --kd-score 65 \
+  --gl us \
   --output /tmp/ahrefs-kd.json
 
 python3 skills/demand-validation-os/scripts/run_demand_workflow.py \
   --mode demand \
   --query "ai image generator" \
   --domain janitorai.com \
-  --kd-score 42 \
+  --kd-force \
   --output /tmp/ai-image-generator-workflow.json
 ```
 
@@ -120,7 +120,8 @@ Current state:
 - `capture_api.py` now also emits a top-level `normalized` layer so downstream scale / skill code can read one stable cross-tool schema instead of stitching raw Similarweb / Semrush payloads manually.
 - `capture_service.py` exposes the same capture plan over local HTTP/JSON with `GET /health`, `POST /capture`, and `POST /capture/tool`.
 - `capture_service.py` keeps the same strict execution policy as the CLI: `single_device + single_browser + single_active_page + serial`, and rejects concurrent capture requests with HTTP `409`.
-- `web_cafe_kd.py` is a lightweight public evidence adapter for `seo.web.cafe/kd/`. It does not replace Semrush/Similarweb, but it helps decide whether to attack a head term directly or cut narrower into alternative / scenario / template pages.
+- `web_cafe_kd.py` now auto-fetches live structured JSON from `seo.web.cafe/kd/` through the homepage `kd-token` plus the site-local `api/kd` endpoint. It does not replace Semrush/Similarweb, but it helps decide whether to attack a head term directly or cut narrower into alternative / scenario / template pages.
+- `web_cafe_kd.py` still accepts `--kd-score` and `--kd-input` as fallback modes when live fetch is disabled or unavailable.
 - `run_demand_workflow.py` now accepts a full prebuilt `bundle_payload`, not just a file path, so later scale or service code can hand normalized capture data directly into the scoring and artifact layers.
 - `workflow_service.py` is the higher-level scale entrypoint. It returns final `新词验证 / 榜单归因` workflow output plus page-artifact JSON in one HTTP call.
 - `workflow_scale.py` now holds the reusable thin `scale_output` projection so both CLI and HTTP callers get the same compact result shape.

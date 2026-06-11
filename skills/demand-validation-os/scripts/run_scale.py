@@ -21,6 +21,7 @@ def read_jobs(path: str) -> list[dict[str, Any]]:
 
 
 def run_one(job: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    args_dict = vars(args)
     mode = (job.get("mode") or args.mode or "").strip()
     if mode not in {"demand", "attribution"}:
         raise ValueError("Each job must provide mode='demand' or mode='attribution'.")
@@ -30,28 +31,42 @@ def run_one(job: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("Each job must provide query.")
 
     domain = (job.get("domain") or args.domain or "").strip() or None
-    bundle_input = job.get("bundle_input") or args.bundle_input
-    trends_input = job.get("trends_input") or args.trends_input
+    bundle_input = job.get("bundle_input") or args_dict.get("bundle_input")
+    trends_input = job.get("trends_input") or args_dict.get("trends_input")
     bundle_payload = job.get("bundle_payload")
+    kd_input = job.get("kd_input") or args_dict.get("kd_input")
+    kd_score = job.get("kd_score")
+    if kd_score is None:
+        kd_score = args_dict.get("kd_score")
+    kd_live = job.get("kd_live")
+    if kd_live is None:
+        kd_live = not bool(args_dict.get("disable_kd_live"))
 
-    username = (job.get("username") or args.username or os.environ.get("THREEUE_USERNAME") or "").strip()
-    password = job.get("password") or args.password or os.environ.get("THREEUE_PASSWORD") or ""
+    username = (job.get("username") or args_dict.get("username") or os.environ.get("THREEUE_USERNAME") or "").strip()
+    password = job.get("password") or args_dict.get("password") or os.environ.get("THREEUE_PASSWORD") or ""
 
     workflow = run_demand_workflow.build_workflow(
         mode=mode,
         query=query,
         domain=domain or (query if run_demand_workflow.looks_like_domain(query) else None),
-        geo=(job.get("geo") or args.geo or "US").strip() or "US",
+        geo=(job.get("geo") or args_dict.get("geo") or "US").strip() or "US",
         username=username,
         password=password,
-        max_node_rotations=int(job.get("max_node_rotations") or args.max_node_rotations or 2),
-        brand_name=job.get("brand_name") or args.brand_name or "",
-        brand_url=job.get("brand_url") or args.brand_url or "",
-        primary_cta_url=job.get("primary_cta_url") or args.primary_cta_url or "",
-        primary_cta_label=job.get("primary_cta_label") or args.primary_cta_label or "",
+        max_node_rotations=int(job.get("max_node_rotations") or args_dict.get("max_node_rotations") or 2),
+        brand_name=job.get("brand_name") or args_dict.get("brand_name") or "",
+        brand_url=job.get("brand_url") or args_dict.get("brand_url") or "",
+        primary_cta_url=job.get("primary_cta_url") or args_dict.get("primary_cta_url") or "",
+        primary_cta_label=job.get("primary_cta_label") or args_dict.get("primary_cta_label") or "",
         bundle_input=bundle_input,
         bundle_payload=bundle_payload,
         trends_input=trends_input,
+        kd_input=kd_input,
+        kd_score=kd_score,
+        kd_live=bool(kd_live),
+        kd_gl=(job.get("kd_gl") or args_dict.get("kd_gl") or "us").strip() or "us",
+        kd_hl=(job.get("kd_hl") or args_dict.get("kd_hl") or "en").strip() or "en",
+        kd_force=bool(job.get("kd_force") or args_dict.get("kd_force")),
+        kd_token=job.get("kd_token") or args_dict.get("kd_token") or None,
     )
     scale_output = build_scale_output(workflow)
     return {
@@ -122,6 +137,13 @@ def main() -> int:
     parser.add_argument("--primary-cta-label", default="")
     parser.add_argument("--bundle-input", help="Reuse an existing capture bundle JSON file")
     parser.add_argument("--trends-input", help="Reuse an existing Google Trends JSON file")
+    parser.add_argument("--kd-input", help="Reuse an existing web.cafe KD JSON file")
+    parser.add_argument("--kd-score", type=float, help="Manual KD score from seo.web.cafe/kd/")
+    parser.add_argument("--disable-kd-live", action="store_true", help="Skip live web.cafe KD fetch and fall back to manual/unknown")
+    parser.add_argument("--kd-gl", default="us", help="web.cafe KD Google country code")
+    parser.add_argument("--kd-hl", default="en", help="web.cafe KD language code")
+    parser.add_argument("--kd-force", action="store_true", help="Force live web.cafe KD recompute instead of cached result")
+    parser.add_argument("--kd-token", help="Optional explicit web.cafe KD page token override")
     parser.add_argument("--jobs-input", help="Run a batch JSON array of workflow jobs")
     parser.add_argument("--include-workflow", action="store_true", help="Include full workflow JSON alongside scale output")
     parser.add_argument("--table-output", help="Write flattened scale rows to csv/tsv/xlsx/json")

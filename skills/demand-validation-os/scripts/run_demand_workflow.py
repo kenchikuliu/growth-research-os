@@ -992,6 +992,11 @@ def build_workflow(
     trends_input: str | None = None,
     kd_input: str | None = None,
     kd_score: int | None = None,
+    kd_live: bool = True,
+    kd_gl: str = "us",
+    kd_hl: str = "en",
+    kd_force: bool = False,
+    kd_token: str | None = None,
 ) -> dict[str, Any]:
     page_type = query_page_type(query)
     knowledge = knowledge_payload(mode, query)
@@ -1002,7 +1007,16 @@ def build_workflow(
             trends = google_trends.collect(query, geo=geo)
         except Exception as exc:
             trends = degraded_trends_payload(query, geo, f"{type(exc).__name__}: {exc}")
-    kd_payload = web_cafe_kd.collect(query=query, kd_score=kd_score, kd_input=kd_input)
+    kd_payload = web_cafe_kd.collect(
+        query=query,
+        kd_score=kd_score,
+        kd_input=kd_input,
+        live=kd_live,
+        gl=kd_gl,
+        hl=kd_hl,
+        force=kd_force,
+        token=kd_token,
+    )
     bundle = capture_bundle_payload(
         domain=domain,
         username=username,
@@ -1106,6 +1120,11 @@ def main() -> int:
     parser.add_argument("--trends-input", help="Reuse an existing Google Trends JSON file instead of refetching")
     parser.add_argument("--kd-input", help="Reuse an existing web.cafe KD JSON file")
     parser.add_argument("--kd-score", type=int, help="Manual KD score from seo.web.cafe/kd/")
+    parser.add_argument("--disable-kd-live", action="store_true", help="Skip live web.cafe KD fetch and fall back to manual/unknown")
+    parser.add_argument("--kd-gl", default="us", help="web.cafe KD Google country code")
+    parser.add_argument("--kd-hl", default="en", help="web.cafe KD language code")
+    parser.add_argument("--kd-force", action="store_true", help="Force live web.cafe KD recompute instead of cached result")
+    parser.add_argument("--kd-token", help="Optional explicit web.cafe KD page token override")
     parser.add_argument("--output", help="Write workflow JSON to a file")
     args = parser.parse_args()
 
@@ -1130,6 +1149,11 @@ def main() -> int:
         trends_input=args.trends_input,
         kd_input=args.kd_input,
         kd_score=args.kd_score,
+        kd_live=not args.disable_kd_live,
+        kd_gl=args.kd_gl,
+        kd_hl=args.kd_hl,
+        kd_force=args.kd_force,
+        kd_token=args.kd_token,
     )
     text = json.dumps(workflow, ensure_ascii=False, indent=2)
     if args.output:

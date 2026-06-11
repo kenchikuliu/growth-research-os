@@ -173,6 +173,72 @@ class WebCafeKdTests(unittest.TestCase):
         self.assertEqual(payload["kd_bucket"], "hard")
         self.assertIn("更适合", payload["guidance"])
 
+    def test_web_cafe_kd_collect_live_payload(self) -> None:
+        original_fetch_live_payload = web_cafe_kd.fetch_live_payload
+        try:
+            web_cafe_kd.fetch_live_payload = lambda **kwargs: {
+                "query": kwargs["query"],
+                "available": True,
+                "kd_score": 45.3,
+                "kd_bucket": "moderate",
+                "guidance": "不要只看这个词本身，先找对比页、模板页或长尾场景页切入。",
+                "keyword_type": "brand",
+                "source": {"mode": "live_page_token_api"},
+                "notes": [],
+            }
+            payload = web_cafe_kd.collect(query="ahrefs alternative")
+        finally:
+            web_cafe_kd.fetch_live_payload = original_fetch_live_payload
+
+        self.assertTrue(payload["available"])
+        self.assertEqual(payload["kd_bucket"], "moderate")
+        self.assertEqual(payload["source"]["mode"], "live_page_token_api")
+
+    def test_web_cafe_kd_collect_live_failure_degrades(self) -> None:
+        original_fetch_live_payload = web_cafe_kd.fetch_live_payload
+        original_read_cached_payload = web_cafe_kd.read_cached_payload
+        try:
+            def fail(**kwargs: object) -> dict[str, object]:
+                raise RuntimeError("boom")
+
+            web_cafe_kd.fetch_live_payload = fail
+            web_cafe_kd.read_cached_payload = lambda **kwargs: None
+            payload = web_cafe_kd.collect(query="ahrefs alternative")
+        finally:
+            web_cafe_kd.fetch_live_payload = original_fetch_live_payload
+            web_cafe_kd.read_cached_payload = original_read_cached_payload
+
+        self.assertFalse(payload["available"])
+        self.assertEqual(payload["kd_bucket"], "unknown")
+        self.assertIn("Live web.cafe KD fetch failed", payload["notes"][0])
+
+    def test_web_cafe_kd_collect_uses_cached_payload_after_live_failure(self) -> None:
+        original_fetch_live_payload = web_cafe_kd.fetch_live_payload
+        original_read_cached_payload = web_cafe_kd.read_cached_payload
+        try:
+            def fail(**kwargs: object) -> dict[str, object]:
+                raise RuntimeError("quota")
+
+            web_cafe_kd.fetch_live_payload = fail
+            web_cafe_kd.read_cached_payload = lambda **kwargs: {
+                "query": "ahrefs alternative",
+                "available": True,
+                "kd_score": 45.3,
+                "kd_bucket": "moderate",
+                "guidance": "不要只看这个词本身，先找对比页、模板页或长尾场景页切入。",
+                "source": {"mode": "live_page_token_api"},
+                "notes": ["cached result"],
+            }
+            payload = web_cafe_kd.collect(query="ahrefs alternative")
+        finally:
+            web_cafe_kd.fetch_live_payload = original_fetch_live_payload
+            web_cafe_kd.read_cached_payload = original_read_cached_payload
+
+        self.assertTrue(payload["available"])
+        self.assertEqual(payload["source"]["mode"], "cached_fallback_after_live_failure")
+        self.assertIn("cached result", payload["notes"][0])
+        self.assertIn("cached result was reused", payload["notes"][-1])
+
 
 class DemandWorkflowHeuristicsTests(unittest.TestCase):
     def test_query_page_type_prefers_tool_for_generator_query(self) -> None:
@@ -895,6 +961,7 @@ class BuildWorkflowOrchestrationTests(unittest.TestCase):
         original_build_guided_flow = guided_flow.build_guided_flow
         original_build_method_alignment = run_demand_workflow.build_method_alignment
         original_build_page_artifacts_payload = run_demand_workflow.build_page_artifacts_payload
+        original_kd_collect = web_cafe_kd.collect
 
         calls: list[str] = []
         fake_knowledge = {
@@ -982,6 +1049,18 @@ class BuildWorkflowOrchestrationTests(unittest.TestCase):
                 self.assertEqual(kwargs["domain"], "pdftoepub.app")
                 return fake_bundle
 
+            def fake_kd_collect(**kwargs) -> dict:
+                self.assertEqual(kwargs["query"], "pdf to epub")
+                return {
+                    "query": "pdf to epub",
+                    "available": False,
+                    "kd_score": None,
+                    "kd_bucket": "unknown",
+                    "guidance": "当前没有稳定 KD 值，不能把难度判断当成定量结论。",
+                    "notes": ["test stub"],
+                    "source": {"mode": "test_stub"},
+                }
+
             def fake_demand_raw_scores(*, query: str, page_type: str, trends: dict, bundle: dict, kd_payload: dict | None = None):
                 calls.append("raw_scores")
                 self.assertEqual(query, "pdf to epub")
@@ -1030,6 +1109,7 @@ class BuildWorkflowOrchestrationTests(unittest.TestCase):
 
             run_demand_workflow.knowledge_payload = fake_knowledge_payload
             google_trends.collect = fake_collect
+            web_cafe_kd.collect = fake_kd_collect
             run_demand_workflow.capture_bundle_payload = fake_capture_bundle_payload
             run_demand_workflow.demand_raw_scores = fake_demand_raw_scores
             run_demand_workflow.score_payload = fake_score_payload
@@ -1050,6 +1130,7 @@ class BuildWorkflowOrchestrationTests(unittest.TestCase):
         finally:
             run_demand_workflow.knowledge_payload = original_knowledge_payload
             google_trends.collect = original_collect
+            web_cafe_kd.collect = original_kd_collect
             run_demand_workflow.capture_bundle_payload = original_capture_bundle_payload
             run_demand_workflow.demand_raw_scores = original_demand_raw_scores
             run_demand_workflow.score_payload = original_score_payload
@@ -1209,6 +1290,71 @@ class WorkflowNormalizedIntegrationTests(unittest.TestCase):
         self.assertIn("web.cafe KD=65", workflow["derived"]["kd_summary"])
         proof_points = workflow["artifacts"]["page_artifacts"]["publishable_pages"][0]["hero"]["supporting_proof"]
         self.assertTrue(any("web.cafe KD" in point for point in proof_points))
+
+    def test_build_workflow_uses_live_web_cafe_kd_by_default(self) -> None:
+        original_knowledge_payload = run_demand_workflow.knowledge_payload
+        original_collect = google_trends.collect
+        original_kd_collect = web_cafe_kd.collect
+        calls: list[dict[str, object]] = []
+        try:
+            run_demand_workflow.knowledge_payload = lambda mode, query: {
+                "gefei": {"summary": "不要只交关键词列表", "search_output": "similarweb"},
+                "chuhai": {"focus_methods": ["landing pages"], "method_highlights": ["着落页", "主要页面"]},
+            }
+            google_trends.collect = lambda query, geo="US": {
+                "available": True,
+                "summary": {"primary_shape": "rising", "top_rising_queries": [{"query": "ahrefs alternative free"}]},
+            }
+
+            def fake_kd_collect(**kwargs: object) -> dict[str, object]:
+                calls.append(kwargs)
+                return {
+                    "query": kwargs["query"],
+                    "available": True,
+                    "kd_score": 45.3,
+                    "kd_bucket": "moderate",
+                    "guidance": "不要只看这个词本身，先找对比页、模板页或长尾场景页切入。",
+                    "source": {"mode": "live_page_token_api"},
+                    "notes": [],
+                }
+
+            web_cafe_kd.collect = fake_kd_collect
+            bundle = {
+                "request": {"query": {"type": "domain", "value": "ahrefs.com"}},
+                "results": {
+                    "semrush": {"data": {"top_pages": [], "top_organic_keywords": []}},
+                    "similarweb": {"data": {"website_evidence": {"website_performance": {"available": True}}}},
+                },
+                "summary": {"core_ready_tools": ["semrush", "similarweb"]},
+                "normalized": {
+                    "tools_ready": ["semrush", "similarweb"],
+                    "top_pages": [],
+                    "top_keywords": [],
+                    "landing_pages": [],
+                    "page_clusters": [],
+                    "traffic_summary": {},
+                    "tool_signals": {"similarweb": {"website_performance_ready": True}, "semrush": {}},
+                },
+            }
+            workflow = run_demand_workflow.build_workflow(
+                mode="demand",
+                query="ahrefs alternative",
+                domain="ahrefs.com",
+                geo="US",
+                username="u",
+                password="p",
+                max_node_rotations=2,
+                bundle_payload=bundle,
+            )
+        finally:
+            run_demand_workflow.knowledge_payload = original_knowledge_payload
+            google_trends.collect = original_collect
+            web_cafe_kd.collect = original_kd_collect
+
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0]["live"])
+        self.assertEqual(calls[0]["gl"], "us")
+        self.assertEqual(workflow["evidence"]["web_cafe_kd"]["source"]["mode"], "live_page_token_api")
 
 
 class NormalizedArtifactTests(unittest.TestCase):
