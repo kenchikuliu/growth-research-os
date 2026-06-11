@@ -269,7 +269,8 @@ python3 scripts/run_scale.py \
   --domain ahrefs.com \
   --brand-name "Your Brand" \
   --brand-url "https://example.com" \
-  --primary-cta-url "https://example.com/signup"
+  --primary-cta-url "https://example.com/signup" \
+  --table-output /tmp/scale-results.xlsx
 ```
 
 Current behavior:
@@ -298,6 +299,7 @@ Thin scale behavior:
 - `/scale` returns only the compact `scale_output`
 - `/scale/page-artifacts` returns `scale_output` plus `page_artifacts`
 - `scripts/run_scale.py` does the same locally, and also supports batch jobs via `--jobs-input`
+- `scripts/run_scale.py` accepts `json / csv / tsv / xlsx` batch inputs and can export flattened rows to `json / csv / tsv / xlsx` with `--table-output`
 
 Example:
 
@@ -416,6 +418,12 @@ python3 scripts/page_artifacts.py \
   --primary-cta-url "https://example.com/signup" \
   --output /tmp/ai-image-generator-page-artifacts.json
 ```
+
+Current artifact behavior:
+
+- keeps the existing `page_json`
+- adds `frontend_payload` per page for direct renderer consumption
+- adds top-level `frontend_protocol` so frontend code can understand available page template types without guessing
 
 ## Google Trends Script
 

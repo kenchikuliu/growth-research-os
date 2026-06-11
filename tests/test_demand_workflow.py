@@ -25,6 +25,7 @@ import workflow_service
 import workflow_scale
 import run_scale
 import page_artifacts
+import tabular_io
 import render_report
 
 
@@ -255,6 +256,11 @@ class DemandWorkflowHeuristicsTests(unittest.TestCase):
         self.assertEqual(first["direct_answers"][0]["question"], "为什么你是这个竞品的替代方案")
         self.assertTrue(first["comparison_section"]["rows"])
         self.assertIn("价格", [row["dimension"] for row in first["comparison_section"]["rows"]])
+        frontend = artifacts["pages"][0]["frontend_payload"]
+        self.assertEqual(frontend["template"], "comparison_page")
+        self.assertEqual(frontend["route"]["slug"], "ahrefs-alternative")
+        self.assertEqual(frontend["hero"]["primary_cta"]["url"], "https://example.com/signup")
+        self.assertEqual(frontend["sections"][2]["type"], "comparison_table")
 
     def test_demand_raw_scores_reward_complete_evidence(self) -> None:
         trends = {
@@ -1167,6 +1173,32 @@ class NormalizedArtifactTests(unittest.TestCase):
         self.assertEqual(counts["similarweb_paid_landing_pages"], 1)
         self.assertEqual(counts["similarweb_folder_rows"], 2)
 
+    def test_page_artifacts_expose_frontend_protocol_summary(self) -> None:
+        workflow = {
+            "input": {"query": "ahrefs alternative"},
+            "report": {
+                "first_batch_of_pages": [
+                    {
+                        "working_title": "ahrefs alternative",
+                        "page_type": "对比页",
+                        "primary_keyword": "ahrefs alternative",
+                        "hero_primary_cta": "马上注册",
+                        "page_blueprint": {
+                            "title_formula": "ahrefs Alternative：为什么很多用户选择你的品牌",
+                            "recommended_h2": "ahrefs vs 你的品牌：Comparison",
+                            "comparison_table_dimensions": ["价格"],
+                            "fit_section_rule": "rule",
+                        },
+                    }
+                ]
+            },
+            "derived": {"page_signal_summary": "ps", "keyword_signal_summary": "ks"},
+            "decision": {"recommended_action": "ship_cluster"},
+        }
+        artifacts = page_artifacts.build_page_artifacts(workflow)
+        self.assertEqual(artifacts["frontend_protocol"]["version"], "2026-06-11")
+        self.assertIn("comparison_page", artifacts["frontend_protocol"]["page_template_types"])
+
 
 class WorkflowServiceTests(unittest.TestCase):
     def test_workflow_service_returns_scale_output_and_page_artifacts(self) -> None:
@@ -1376,3 +1408,58 @@ class RunScaleCliTests(unittest.TestCase):
             jobs_path.unlink(missing_ok=True)
         self.assertEqual(len(jobs), 2)
         self.assertEqual(jobs[0]["query"], "q1")
+
+    def test_run_scale_reads_csv_jobs(self) -> None:
+        jobs_path = ROOT / "tmp-run-scale-jobs.csv"
+        jobs_path.write_text("mode,query,domain\n demand , ahrefs alternative , ahrefs.com \n attribution , crazygames.com , crazygames.com \n")
+        try:
+            jobs = run_scale.read_jobs(str(jobs_path))
+        finally:
+            jobs_path.unlink(missing_ok=True)
+        self.assertEqual(len(jobs), 2)
+        self.assertEqual(jobs[0]["mode"], "demand")
+        self.assertEqual(jobs[0]["query"], "ahrefs alternative")
+
+    def test_run_scale_writes_flat_csv_output(self) -> None:
+        output_path = ROOT / "tmp-scale-output.csv"
+        rows = [
+            run_scale.flatten_scale_result(
+                index=1,
+                mode="demand",
+                query="ahrefs alternative",
+                result={
+                    "scale_output": {
+                        "domain": "ahrefs.com",
+                        "decision": {"band": "ship_cluster", "recommended_action": "ship_cluster", "total_score": 74},
+                        "direct_answer": {"core_conclusion": "ok"},
+                        "page_plan": {"page_artifact_count": 1, "artifacts_available": True, "first_batch_of_pages": [{"working_title": "ahrefs alternative"}]},
+                        "normalized_snapshot": {"tools_ready": ["semrush", "similarweb"], "top_page_count": 2, "top_keyword_count": 3, "landing_page_count": 1, "page_cluster_count": 1},
+                    },
+                    "page_artifacts": {"pages": [{"slug": "ahrefs-alternative"}]},
+                },
+            )
+        ]
+        try:
+            tabular_io.write_rows(str(output_path), rows, sheet_name="scale_results")
+            written = output_path.read_text()
+        finally:
+            output_path.unlink(missing_ok=True)
+        self.assertIn("recommended_action", written)
+        self.assertIn("ship_cluster", written)
+
+
+class TabularIoTests(unittest.TestCase):
+    def test_tabular_io_round_trips_xlsx_rows(self) -> None:
+        path = ROOT / "tmp-tabular.xlsx"
+        rows = [
+            {"mode": "demand", "query": "ahrefs alternative", "score": 74},
+            {"mode": "attribution", "query": "crazygames.com", "score": 68},
+        ]
+        try:
+            tabular_io.write_rows(str(path), rows, sheet_name="jobs")
+            loaded = tabular_io.read_rows(str(path))
+        finally:
+            path.unlink(missing_ok=True)
+        self.assertEqual(len(loaded), 2)
+        self.assertEqual(loaded[0]["mode"], "demand")
+        self.assertEqual(loaded[1]["query"], "crazygames.com")

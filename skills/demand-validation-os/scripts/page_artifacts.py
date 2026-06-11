@@ -289,79 +289,87 @@ def build_comparison_page_artifact(page: dict[str, Any], workflow: dict[str, Any
         f"{brand_name} 会更直接。{keyword_signal or page_signal}"
     ).strip()
 
+    page_json = {
+        "page_type": "comparison",
+        "title": blueprint.get("title_formula") or f"{competitor} Alternative：为什么很多用户选择{brand_name}",
+        "meta_title": blueprint.get("title_formula") or f"{competitor} Alternative：为什么很多用户选择{brand_name}",
+        "meta_description": (
+            f"直接回答为什么 {brand_name} 是 {competitor} 的替代方案、它更适合哪类用户、以及用户现在怎么马上开始用。"
+        ),
+        "h1": blueprint.get("title_formula") or f"{competitor} Alternative：为什么很多用户选择{brand_name}",
+        "hero": {
+            "eyebrow": "Alternative / Comparison",
+            "headline": f"不是再多一个工具面板，而是把验证、诊断和页面动作串成一个 workflow。",
+            "subheadline": hero_subheadline,
+            "primary_cta": {
+                "label": cta_label,
+                "url": cta_url,
+            },
+            "supporting_proof": proof_points[:3],
+        },
+        "direct_answers": [
+            {
+                "question": "为什么你是这个竞品的替代方案",
+                "answer": (
+                    f"{brand_name} 更像一条决策链，而不只是一个查询入口。"
+                    "它把 Similarweb 的落地页信号、Semrush 的页面和词、Google Trends 的趋势形状，再加上 gefei / chuhai 的判断规则，"
+                    "直接收束成可执行的下一步。"
+                ),
+            },
+            {
+                "question": "你比它更适合哪类用户",
+                "answer": (
+                    f"{brand_name} 更适合不是只想查数，而是想判断一个 demand 值不值得做、"
+                    "该先做工具页还是对比页、以及首批页面应该怎么排优先级的人。"
+                ),
+            },
+            {
+                "question": "用户现在可以马上怎么开始用你",
+                "answer": (
+                    f"直接拿一个竞品词或域名跑一遍 workflow，先看 {conclusion or 'recommended action'}，"
+                    "再看 first batch of pages，最后把这页 comparison JSON 拿去落页。"
+                ),
+            },
+        ],
+        "fit_for": build_fit_for_blocks(),
+        "comparison_section": {
+            "heading": blueprint.get("recommended_h2") or f"{competitor} vs {brand_name}：Comparison",
+            "rows": build_comparison_rows(competitor, brand_name, workflow),
+            "table_dimensions": blueprint.get("comparison_table_dimensions") or [],
+        },
+        "evidence_section": {
+            "heading": "为什么这页不是拍脑袋写的",
+            "proof_points": proof_points,
+            "page_signal_summary": page_signal,
+            "keyword_signal_summary": keyword_signal,
+        },
+        "faq": build_faq(competitor, brand_name),
+        "internal_links": [
+            "主工具页",
+            "定价页",
+            "模板页",
+            "相关场景页",
+        ],
+        "editorial_notes": {
+            "fit_section_rule": blueprint.get("fit_section_rule"),
+            "seo_notes": blueprint.get("seo_notes") or [],
+            "manual_fill_required_rows": [
+                row["dimension"] for row in build_comparison_rows(competitor, brand_name, workflow) if row["manual_fill_required"]
+            ],
+        },
+    }
     return {
         "kind": "comparison_page",
         "slug": page_slug,
         "target_path": f"/alternatives/{page_slug}",
-        "page_json": {
-            "page_type": "comparison",
-            "title": blueprint.get("title_formula") or f"{competitor} Alternative：为什么很多用户选择{brand_name}",
-            "meta_title": blueprint.get("title_formula") or f"{competitor} Alternative：为什么很多用户选择{brand_name}",
-            "meta_description": (
-                f"直接回答为什么 {brand_name} 是 {competitor} 的替代方案、它更适合哪类用户、以及用户现在怎么马上开始用。"
-            ),
-            "h1": blueprint.get("title_formula") or f"{competitor} Alternative：为什么很多用户选择{brand_name}",
-            "hero": {
-                "eyebrow": "Alternative / Comparison",
-                "headline": f"不是再多一个工具面板，而是把验证、诊断和页面动作串成一个 workflow。",
-                "subheadline": hero_subheadline,
-                "primary_cta": {
-                    "label": cta_label,
-                    "url": cta_url,
-                },
-                "supporting_proof": proof_points[:3],
-            },
-            "direct_answers": [
-                {
-                    "question": "为什么你是这个竞品的替代方案",
-                    "answer": (
-                        f"{brand_name} 更像一条决策链，而不只是一个查询入口。"
-                        "它把 Similarweb 的落地页信号、Semrush 的页面和词、Google Trends 的趋势形状，再加上 gefei / chuhai 的判断规则，"
-                        "直接收束成可执行的下一步。"
-                    ),
-                },
-                {
-                    "question": "你比它更适合哪类用户",
-                    "answer": (
-                        f"{brand_name} 更适合不是只想查数，而是想判断一个 demand 值不值得做、"
-                        "该先做工具页还是对比页、以及首批页面应该怎么排优先级的人。"
-                    ),
-                },
-                {
-                    "question": "用户现在可以马上怎么开始用你",
-                    "answer": (
-                        f"直接拿一个竞品词或域名跑一遍 workflow，先看 {conclusion or 'recommended action'}，"
-                        "再看 first batch of pages，最后把这页 comparison JSON 拿去落页。"
-                    ),
-                },
-            ],
-            "fit_for": build_fit_for_blocks(),
-            "comparison_section": {
-                "heading": blueprint.get("recommended_h2") or f"{competitor} vs {brand_name}：Comparison",
-                "rows": build_comparison_rows(competitor, brand_name, workflow),
-                "table_dimensions": blueprint.get("comparison_table_dimensions") or [],
-            },
-            "evidence_section": {
-                "heading": "为什么这页不是拍脑袋写的",
-                "proof_points": proof_points,
-                "page_signal_summary": page_signal,
-                "keyword_signal_summary": keyword_signal,
-            },
-            "faq": build_faq(competitor, brand_name),
-            "internal_links": [
-                "主工具页",
-                "定价页",
-                "模板页",
-                "相关场景页",
-            ],
-            "editorial_notes": {
-                "fit_section_rule": blueprint.get("fit_section_rule"),
-                "seo_notes": blueprint.get("seo_notes") or [],
-                "manual_fill_required_rows": [
-                    row["dimension"] for row in build_comparison_rows(competitor, brand_name, workflow) if row["manual_fill_required"]
-                ],
-            },
-        },
+        "page_json": page_json,
+        "frontend_payload": build_frontend_payload(
+            kind="comparison_page",
+            slug=page_slug,
+            target_path=f"/alternatives/{page_slug}",
+            page_json=page_json,
+            workflow=workflow,
+        ),
     }
 
 
@@ -370,26 +378,114 @@ def build_generic_page_artifact(page: dict[str, Any], workflow: dict[str, Any], 
     cta_label = brand_context["primary_cta_label"] or page.get("hero_primary_cta") or "立即开始"
     cta_url = brand_context["primary_cta_url"] or brand_context["brand_url"] or "/start"
     proof_points = build_proof_points(workflow)
+    page_json = {
+        "page_type": page.get("page_type"),
+        "title": page.get("working_title"),
+        "h1": page.get("working_title"),
+        "hero": {
+            "headline": page.get("working_title"),
+            "subheadline": page.get("content_or_tool_structure"),
+            "primary_cta": {
+                "label": cta_label,
+                "url": cta_url,
+            },
+        },
+        "evidence_basis": page.get("evidence_basis"),
+        "proof_points": proof_points[:3],
+        "internal_links": page.get("internal_links_to"),
+        "monetization_path": page.get("monetization_path"),
+    }
     return {
         "kind": "page_brief",
         "slug": page_slug,
         "target_path": f"/pages/{page_slug}",
-        "page_json": {
-            "page_type": page.get("page_type"),
-            "title": page.get("working_title"),
-            "h1": page.get("working_title"),
-            "hero": {
-                "headline": page.get("working_title"),
-                "subheadline": page.get("content_or_tool_structure"),
-                "primary_cta": {
-                    "label": cta_label,
-                    "url": cta_url,
-                },
+        "page_json": page_json,
+        "frontend_payload": build_frontend_payload(
+            kind="page_brief",
+            slug=page_slug,
+            target_path=f"/pages/{page_slug}",
+            page_json=page_json,
+            workflow=workflow,
+        ),
+    }
+
+
+def build_frontend_payload(
+    *,
+    kind: str,
+    slug: str,
+    target_path: str,
+    page_json: dict[str, Any],
+    workflow: dict[str, Any],
+) -> dict[str, Any]:
+    hero = page_json.get("hero") or {}
+    direct_answers = page_json.get("direct_answers") or []
+    fit_for = page_json.get("fit_for") or []
+    comparison = page_json.get("comparison_section") or {}
+    evidence = page_json.get("evidence_section") or {}
+    faq = page_json.get("faq") or []
+    editorial = page_json.get("editorial_notes") or {}
+    return {
+        "version": "2026-06-11",
+        "template": kind,
+        "route": {
+            "slug": slug,
+            "path": target_path,
+        },
+        "seo": {
+            "title": page_json.get("meta_title") or page_json.get("title") or page_json.get("h1"),
+            "description": page_json.get("meta_description") or evidence.get("page_signal_summary") or "",
+            "h1": page_json.get("h1") or page_json.get("title"),
+        },
+        "hero": {
+            "eyebrow": hero.get("eyebrow"),
+            "headline": hero.get("headline"),
+            "subheadline": hero.get("subheadline"),
+            "primary_cta": hero.get("primary_cta") or {},
+            "supporting_proof": hero.get("supporting_proof") or page_json.get("proof_points") or [],
+        },
+        "sections": [
+            {
+                "type": "direct_answers",
+                "heading": "直接回答三个问题",
+                "items": direct_answers,
             },
-            "evidence_basis": page.get("evidence_basis"),
-            "proof_points": proof_points[:3],
-            "internal_links": page.get("internal_links_to"),
-            "monetization_path": page.get("monetization_path"),
+            {
+                "type": "fit_for",
+                "heading": "更适合谁",
+                "items": fit_for,
+            },
+            {
+                "type": "comparison_table",
+                "heading": comparison.get("heading"),
+                "dimensions": comparison.get("table_dimensions") or [],
+                "rows": comparison.get("rows") or [],
+            },
+            {
+                "type": "evidence",
+                "heading": evidence.get("heading") or "证据",
+                "proof_points": evidence.get("proof_points") or page_json.get("proof_points") or [],
+                "page_signal_summary": evidence.get("page_signal_summary") or page_json.get("evidence_basis") or "",
+                "keyword_signal_summary": evidence.get("keyword_signal_summary") or "",
+            },
+            {
+                "type": "faq",
+                "heading": "常见问题",
+                "items": faq,
+            },
+        ],
+        "navigation": {
+            "internal_links": page_json.get("internal_links") or [],
+        },
+        "editorial": {
+            "notes": editorial.get("seo_notes") or [],
+            "manual_fill_required_rows": editorial.get("manual_fill_required_rows") or [],
+            "fit_section_rule": editorial.get("fit_section_rule") or "",
+        },
+        "source_context": {
+            "query": get_path(workflow, "input", "query", default=""),
+            "mode": workflow.get("mode"),
+            "recommended_action": get_path(workflow, "decision", "recommended_action", default=""),
         },
     }
 
@@ -408,6 +504,10 @@ def build_page_artifacts(workflow: dict[str, Any], brand_context: dict[str, str]
         "brand_context": context,
         "page_count": len(artifacts),
         "pages": artifacts,
+        "frontend_protocol": {
+            "version": "2026-06-11",
+            "page_template_types": sorted({artifact.get("kind") for artifact in artifacts if artifact.get("kind")}),
+        },
     }
 
 

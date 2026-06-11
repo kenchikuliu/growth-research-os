@@ -10,16 +10,14 @@ from pathlib import Path
 from typing import Any
 
 import run_demand_workflow
+import tabular_io
 from workflow_scale import build_scale_output
 
 
 def read_jobs(path: str) -> list[dict[str, Any]]:
-    payload = json.loads(Path(path).read_text())
-    if isinstance(payload, list):
-        return [job for job in payload if isinstance(job, dict)]
-    if isinstance(payload, dict) and isinstance(payload.get("jobs"), list):
-        return [job for job in payload["jobs"] if isinstance(job, dict)]
-    raise ValueError("Jobs input must be a JSON array or an object with a 'jobs' array.")
+    rows = tabular_io.read_rows(path)
+    jobs = [tabular_io.compact_row(row) for row in rows]
+    return [job for job in jobs if isinstance(job, dict)]
 
 
 def run_one(job: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
@@ -72,6 +70,42 @@ def compact_result(result: dict[str, Any], include_workflow: bool) -> dict[str, 
     }
 
 
+def flatten_scale_result(*, index: int | None, mode: str | None, query: str | None, result: dict[str, Any]) -> dict[str, Any]:
+    scale_output = result.get("scale_output") or {}
+    decision = scale_output.get("decision") or {}
+    direct_answer = scale_output.get("direct_answer") or {}
+    page_plan = scale_output.get("page_plan") or {}
+    normalized_snapshot = scale_output.get("normalized_snapshot") or {}
+    page_artifacts = result.get("page_artifacts") or {}
+    first_pages = page_plan.get("first_batch_of_pages") or []
+    slugs = [page.get("slug") for page in (page_artifacts.get("pages") or []) if isinstance(page, dict) and page.get("slug")]
+    return {
+        "index": index if index is not None else "",
+        "mode": mode or scale_output.get("mode") or "",
+        "query": query or scale_output.get("query") or "",
+        "domain": scale_output.get("domain") or "",
+        "band": decision.get("band") or "",
+        "recommended_action": decision.get("recommended_action") or "",
+        "total_score": decision.get("total_score") or "",
+        "all_hard_gates_passed": decision.get("all_hard_gates_passed"),
+        "core_conclusion": direct_answer.get("core_conclusion") or "",
+        "page_type_recommendation": direct_answer.get("page_type_recommendation") or "",
+        "tools_ready": ",".join(normalized_snapshot.get("tools_ready") or []),
+        "top_page_count": normalized_snapshot.get("top_page_count") or 0,
+        "top_keyword_count": normalized_snapshot.get("top_keyword_count") or 0,
+        "landing_page_count": normalized_snapshot.get("landing_page_count") or 0,
+        "page_cluster_count": normalized_snapshot.get("page_cluster_count") or 0,
+        "page_artifact_count": page_plan.get("page_artifact_count") or 0,
+        "artifacts_available": page_plan.get("artifacts_available"),
+        "first_page_titles": " | ".join(
+            page.get("working_title") or page.get("primary_keyword") or ""
+            for page in first_pages
+            if isinstance(page, dict)
+        ),
+        "artifact_slugs": " | ".join(slugs),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Thin CLI over demand-validation workflow and page-artifact outputs.")
     parser.add_argument("--mode", choices=["demand", "attribution"])
@@ -89,22 +123,27 @@ def main() -> int:
     parser.add_argument("--trends-input", help="Reuse an existing Google Trends JSON file")
     parser.add_argument("--jobs-input", help="Run a batch JSON array of workflow jobs")
     parser.add_argument("--include-workflow", action="store_true", help="Include full workflow JSON alongside scale output")
+    parser.add_argument("--table-output", help="Write flattened scale rows to csv/tsv/xlsx/json")
     parser.add_argument("--output", help="Write JSON to a file")
     args = parser.parse_args()
 
     if args.jobs_input:
         jobs = read_jobs(args.jobs_input)
         results = []
+        flat_rows = []
         for idx, job in enumerate(jobs, start=1):
             result = run_one(job, args)
+            mode = (job.get("mode") or args.mode)
+            query = (job.get("query") or args.query)
             results.append(
                 {
                     "index": idx,
-                    "mode": (job.get("mode") or args.mode),
-                    "query": (job.get("query") or args.query),
+                    "mode": mode,
+                    "query": query,
                     **compact_result(result, args.include_workflow),
                 }
             )
+            flat_rows.append(flatten_scale_result(index=idx, mode=mode, query=query, result=result))
         payload: dict[str, Any] = {
             "job_count": len(results),
             "results": results,
@@ -112,10 +151,13 @@ def main() -> int:
     else:
         result = run_one({}, args)
         payload = compact_result(result, args.include_workflow)
+        flat_rows = [flatten_scale_result(index=None, mode=args.mode, query=args.query, result=result)]
 
     text = json.dumps(payload, ensure_ascii=False, indent=2)
     if args.output:
         Path(args.output).write_text(text)
+    if args.table_output:
+        tabular_io.write_rows(args.table_output, flat_rows, sheet_name="scale_results")
     print(text)
     return 0
 

@@ -281,6 +281,27 @@ Default CLI output:
 
 Only include the full workflow tree when `--include-workflow` is passed.
 
+Tabular support:
+
+- `--jobs-input` supports `json / csv / tsv / xlsx`
+- `--table-output` supports `json / csv / tsv / xlsx`
+
+Typical flattened table columns:
+
+- `mode`
+- `query`
+- `domain`
+- `band`
+- `recommended_action`
+- `total_score`
+- `tools_ready`
+- `top_page_count`
+- `top_keyword_count`
+- `landing_page_count`
+- `page_artifact_count`
+- `first_page_titles`
+- `artifact_slugs`
+
 ## Normalized Cross-Tool Schema
 
 The top-level `normalized` block is the stable shared layer for later scale / skill consumers.
@@ -444,6 +465,54 @@ This reduces coupling to raw:
 - `results.similarweb.data.website_evidence.website_content`
 
 The raw payloads still remain available for deeper debugging or later extraction.
+
+## Frontend Artifact Protocol
+
+Each page artifact now contains both:
+
+- `page_json`
+- `frontend_payload`
+
+Top-level artifact bundle also contains:
+
+- `frontend_protocol`
+
+Example:
+
+```json
+{
+  "available": true,
+  "page_count": 1,
+  "frontend_protocol": {
+    "version": "2026-06-11",
+    "page_template_types": ["comparison_page"]
+  },
+  "pages": [
+    {
+      "kind": "comparison_page",
+      "slug": "ahrefs-alternative",
+      "target_path": "/alternatives/ahrefs-alternative",
+      "page_json": {},
+      "frontend_payload": {
+        "version": "2026-06-11",
+        "template": "comparison_page",
+        "route": {
+          "slug": "ahrefs-alternative",
+          "path": "/alternatives/ahrefs-alternative"
+        },
+        "seo": {},
+        "hero": {},
+        "sections": [],
+        "navigation": {},
+        "editorial": {},
+        "source_context": {}
+      }
+    }
+  ]
+}
+```
+
+Use `frontend_payload` when rendering pages in a frontend app. Use `page_json` when you still want the richer editorial shape.
 
 If a 3ue tool page shows a daily-limit wall such as `Daily usage limit reached`, the capture scripts should:
 
