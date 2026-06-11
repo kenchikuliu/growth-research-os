@@ -20,6 +20,7 @@ import run_demand_workflow
 import capture_bundle
 import capture_api
 import capture_service
+import workflow_service
 import page_artifacts
 import render_report
 
@@ -1040,3 +1041,203 @@ class TrendsDegradeTests(unittest.TestCase):
         self.assertFalse(payload["available"])
         self.assertEqual(payload["summary"]["primary_shape"], "missing")
         self.assertEqual(len(payload["windows"]), 4)
+
+
+class WorkflowNormalizedIntegrationTests(unittest.TestCase):
+    def test_capture_bundle_payload_accepts_prebuilt_bundle_payload(self) -> None:
+        bundle = {
+            "request": {"query": {"type": "domain", "value": "crazygames.com"}},
+            "results": {"semrush": {"data": {}}, "similarweb": {"data": {}}},
+            "summary": {"core_ready_tools": ["semrush"]},
+            "normalized": {"tools_ready": ["semrush"]},
+        }
+        payload = run_demand_workflow.capture_bundle_payload(
+            domain="crazygames.com",
+            username="u",
+            password="p",
+            max_node_rotations=2,
+            bundle_payload=bundle,
+        )
+        self.assertEqual(payload["normalized"]["tools_ready"], ["semrush"])
+
+    def test_build_workflow_accepts_bundle_payload_and_keeps_normalized_layer(self) -> None:
+        original_knowledge_payload = run_demand_workflow.knowledge_payload
+        original_collect = google_trends.collect
+        try:
+            run_demand_workflow.knowledge_payload = lambda mode, query: {
+                "gefei": {"summary": "不要只交关键词列表", "search_output": "similarweb"},
+                "chuhai": {"focus_methods": ["landing pages"], "method_highlights": ["着落页", "主要页面"]},
+            }
+            google_trends.collect = lambda query, geo="US": {
+                "available": True,
+                "summary": {"primary_shape": "rising", "top_rising_queries": [{"query": "pdf to epub free"}]},
+            }
+            bundle = {
+                "request": {"query": {"type": "domain", "value": "pdftoepub.app"}},
+                "results": {
+                    "semrush": {
+                        "data": {
+                            "top_pages": [{"url": "https://pdftoepub.app/tool", "title": "PDF to EPUB", "top_keyword": "pdf to epub"}],
+                            "top_organic_keywords": [{"keyword": "pdf to epub"}],
+                        }
+                    },
+                    "similarweb": {"data": {"website_evidence": {"website_performance": {"available": True}}}},
+                },
+                "summary": {"core_ready_tools": ["semrush", "similarweb"]},
+                "normalized": {
+                    "tools_ready": ["semrush", "similarweb"],
+                    "top_pages": [
+                        {
+                            "url": "https://pdftoepub.app/tool",
+                            "title": "PDF to EPUB",
+                            "page_kind": "organic_top_page",
+                            "top_keyword": "pdf to epub",
+                            "source_tool": "semrush",
+                        }
+                    ],
+                    "top_keywords": [
+                        {
+                            "keyword": "pdf to epub",
+                            "keyword_kind": "organic",
+                            "source_tool": "semrush",
+                        }
+                    ],
+                    "landing_pages": [],
+                    "page_clusters": [],
+                    "traffic_summary": {"monthly_visits_estimate": 100000},
+                    "tool_signals": {"similarweb": {"website_performance_ready": True}, "semrush": {}},
+                },
+            }
+            workflow = run_demand_workflow.build_workflow(
+                mode="demand",
+                query="pdf to epub",
+                domain="pdftoepub.app",
+                geo="US",
+                username="u",
+                password="p",
+                max_node_rotations=2,
+                bundle_payload=bundle,
+            )
+        finally:
+            run_demand_workflow.knowledge_payload = original_knowledge_payload
+            google_trends.collect = original_collect
+
+        self.assertEqual(workflow["evidence"]["tool_capture"]["normalized"]["tools_ready"], ["semrush", "similarweb"])
+        self.assertTrue(workflow["artifacts"]["page_artifacts"]["available"])
+
+
+class NormalizedArtifactTests(unittest.TestCase):
+    def test_page_artifacts_evidence_counts_prefer_normalized_layer(self) -> None:
+        workflow = {
+            "evidence": {
+                "tool_capture": {
+                    "normalized": {
+                        "top_pages": [
+                            {"source_tool": "semrush"},
+                            {"source_tool": "semrush"},
+                            {"source_tool": "similarweb"},
+                        ],
+                        "top_keywords": [
+                            {"source_tool": "semrush"},
+                            {"source_tool": "similarweb"},
+                            {"source_tool": "similarweb"},
+                        ],
+                        "landing_pages": [
+                            {"source_tool": "similarweb", "landing_type": "paid_landing_page"},
+                            {"source_tool": "similarweb", "landing_type": "popular_page"},
+                        ],
+                        "page_clusters": [
+                            {"source_tool": "similarweb", "cluster_type": "folder"},
+                            {"source_tool": "similarweb", "cluster_type": "folder"},
+                        ],
+                        "tool_signals": {
+                            "similarweb": {"keyword_count": 2, "landing_page_count": 1},
+                            "semrush": {},
+                        },
+                    }
+                }
+            }
+        }
+        counts = page_artifacts.evidence_counts(workflow)
+        self.assertEqual(counts["semrush_top_pages"], 2)
+        self.assertEqual(counts["similarweb_non_brand_keywords"], 2)
+        self.assertEqual(counts["similarweb_paid_landing_pages"], 1)
+        self.assertEqual(counts["similarweb_folder_rows"], 2)
+
+
+class WorkflowServiceTests(unittest.TestCase):
+    def test_workflow_service_returns_scale_output_and_page_artifacts(self) -> None:
+        original_build_workflow = workflow_service.run_demand_workflow.build_workflow
+        try:
+            workflow_service.run_demand_workflow.build_workflow = lambda **kwargs: {
+                "mode": "demand",
+                "input": {"query": kwargs["query"], "domain": kwargs["domain"]},
+                "decision": {
+                    "band": "ship_cluster",
+                    "recommended_action": "ship_cluster",
+                    "total_score": 74,
+                    "all_hard_gates_passed": True,
+                },
+                "report": {
+                    "core_conclusion": "建议继续做。",
+                    "recommended_action": "ship_cluster",
+                    "page_type_recommendation": "优先按对比页承接。",
+                    "first_batch_of_pages": [{"working_title": "ahrefs alternative"}],
+                },
+                "evidence": {
+                    "tool_capture": {
+                        "normalized": {
+                            "tools_ready": ["semrush", "similarweb"],
+                            "coverage": {"status": "ok"},
+                            "traffic_summary": {"monthly_visits_estimate": 100000},
+                            "top_pages": [{}, {}],
+                            "top_keywords": [{}, {}, {}],
+                            "landing_pages": [{}],
+                            "page_clusters": [{}],
+                        }
+                    }
+                },
+                "artifacts": {
+                    "page_artifacts": {
+                        "available": True,
+                        "page_count": 1,
+                        "pages": [{"slug": "ahrefs-alternative"}],
+                    }
+                },
+            }
+            server = workflow_service.build_server("127.0.0.1", 0)
+            port = server.server_address[1]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                req = Request(
+                    f"http://127.0.0.1:{port}/workflow/page-artifacts",
+                    data=json.dumps(
+                        {
+                            "mode": "demand",
+                            "query": "ahrefs alternative",
+                            "bundle_payload": {
+                                "results": {},
+                                "summary": {},
+                                "normalized": {},
+                            },
+                            "request_id": "wf-1",
+                        }
+                    ).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urlopen(req, timeout=5) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+        finally:
+            workflow_service.run_demand_workflow.build_workflow = original_build_workflow
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["request_id"], "wf-1")
+        self.assertEqual(payload["data"]["workflow_summary"]["decision"]["recommended_action"], "ship_cluster")
+        self.assertTrue(payload["data"]["page_artifacts"]["available"])
+        self.assertEqual(payload["data"]["workflow_summary"]["normalized_snapshot"]["top_keyword_count"], 3)

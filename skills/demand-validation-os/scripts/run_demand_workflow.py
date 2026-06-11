@@ -11,6 +11,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import capture_api
 import capture_bundle
 import google_trends
 import guided_flow
@@ -61,27 +62,136 @@ def page_type_label(page_type: str) -> str:
     }.get(page_type, "内容页")
 
 
+def unwrap_capture_bundle(payload: dict[str, Any]) -> dict[str, Any]:
+    data = payload
+    if isinstance(payload, dict) and isinstance(payload.get("data"), dict) and payload["data"].get("results"):
+        data = payload["data"]
+    return data if isinstance(data, dict) else {}
+
+
+def read_normalized_capture(bundle: dict[str, Any]) -> dict[str, Any]:
+    return (unwrap_capture_bundle(bundle).get("normalized") or {}) if isinstance(bundle, dict) else {}
+
+
+def normalized_rows(
+    bundle: dict[str, Any],
+    key: str,
+    *,
+    source_tool: str | None = None,
+    cluster_type: str | None = None,
+    landing_type: str | None = None,
+) -> list[dict[str, Any]]:
+    rows = read_normalized_capture(bundle).get(key) or []
+    normalized: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if source_tool and row.get("source_tool") != source_tool:
+            continue
+        if cluster_type and row.get("cluster_type") != cluster_type:
+            continue
+        if landing_type and row.get("landing_type") != landing_type:
+            continue
+        normalized.append(row)
+    return normalized
+
+
 def read_top_pages(bundle: dict[str, Any]) -> list[dict[str, Any]]:
-    return (((bundle.get("results") or {}).get("semrush") or {}).get("data") or {}).get("top_pages") or []
+    rows = normalized_rows(bundle, "top_pages", source_tool="semrush")
+    if rows:
+        return [
+            {
+                "title": row.get("title"),
+                "url": row.get("url"),
+                "top_keyword": row.get("top_keyword"),
+                "traffic": row.get("traffic_estimate"),
+                "traffic_percent": row.get("traffic_share_percent"),
+                "position": row.get("position"),
+                "volume": row.get("keyword_volume"),
+            }
+            for row in rows
+        ]
+    return (((unwrap_capture_bundle(bundle).get("results") or {}).get("semrush") or {}).get("data") or {}).get("top_pages") or []
 
 
 def read_top_keywords(bundle: dict[str, Any]) -> list[dict[str, Any]]:
-    return (((bundle.get("results") or {}).get("semrush") or {}).get("data") or {}).get("top_organic_keywords") or []
+    rows = normalized_rows(bundle, "top_keywords", source_tool="semrush")
+    if rows:
+        return [
+            {
+                "keyword": row.get("keyword"),
+                "position": row.get("position"),
+                "position_difference": row.get("position_change"),
+                "volume": row.get("volume"),
+                "traffic": row.get("traffic_estimate"),
+                "traffic_percent": row.get("traffic_share_percent"),
+                "keyword_difficulty": row.get("keyword_difficulty"),
+                "url": row.get("url"),
+            }
+            for row in rows
+        ]
+    return (((unwrap_capture_bundle(bundle).get("results") or {}).get("semrush") or {}).get("data") or {}).get("top_organic_keywords") or []
 
 
 def read_similarweb_website(bundle: dict[str, Any]) -> dict[str, Any]:
-    return (((bundle.get("results") or {}).get("similarweb") or {}).get("data") or {}).get("website_evidence") or {}
+    raw = (((unwrap_capture_bundle(bundle).get("results") or {}).get("similarweb") or {}).get("data") or {}).get("website_evidence") or {}
+    if raw:
+        return raw
+    normalized = read_normalized_capture(bundle)
+    similarweb_signals = (normalized.get("tool_signals") or {}).get("similarweb") or {}
+    return {
+        "website_performance": {
+            "available": bool(similarweb_signals.get("website_performance_ready")),
+        },
+        "home_signals": {
+            "priority_alerts": [{} for _ in range(int(similarweb_signals.get("priority_alert_count") or 0))]
+        },
+    }
 
 
 def similarweb_folder_rows(bundle: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = normalized_rows(bundle, "page_clusters", source_tool="similarweb", cluster_type="folder")
+    if rows:
+        return [
+            {
+                "folder": row.get("label"),
+                "share": row.get("traffic_share_percent"),
+                "month_over_month_change": row.get("traffic_change_pp"),
+            }
+            for row in rows
+        ]
     return (((read_similarweb_website(bundle).get("website_content") or {}).get("summary") or {}).get("rows") or [])
 
 
 def similarweb_non_brand_rows(bundle: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = normalized_rows(bundle, "top_keywords", source_tool="similarweb")
+    if rows:
+        return [
+            {
+                "keyword": row.get("keyword"),
+                "clicks": row.get("traffic_estimate"),
+                "share": row.get("traffic_share_percent"),
+                "organic_share": row.get("organic_share_percent"),
+                "paid_share": row.get("paid_share_percent"),
+            }
+            for row in rows
+        ]
     return (((read_similarweb_website(bundle).get("search_overview") or {}).get("top_non_brand_keywords") or {}).get("rows") or [])
 
 
 def similarweb_paid_landing_rows(bundle: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = normalized_rows(bundle, "landing_pages", source_tool="similarweb", landing_type="paid_landing_page")
+    if rows:
+        return [
+            {
+                "url": row.get("url"),
+                "clicks": row.get("clicks_estimate"),
+                "share": row.get("traffic_share_percent"),
+                "top_keyword": row.get("top_keyword"),
+                "new_keyword_count": row.get("new_keyword_count"),
+            }
+            for row in rows
+        ]
     return (((read_similarweb_website(bundle).get("search_overview") or {}).get("paid_landing_pages") or {}).get("rows") or [])
 
 
@@ -240,68 +350,28 @@ def capture_bundle_payload(
     password: str,
     max_node_rotations: int,
     bundle_input: str | None = None,
+    bundle_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if bundle_payload:
+        return unwrap_capture_bundle(bundle_payload)
     if bundle_input:
-        return json.loads(Path(bundle_input).read_text())
+        return unwrap_capture_bundle(json.loads(Path(bundle_input).read_text()))
     if not domain:
         return {
             "skipped": True,
             "reason": "no-domain-provided",
         }
-
-    bundle: dict[str, Any] = {
-        "query": {"type": "domain", "value": domain},
-        "captured_at": iso_utc_now(),
-        "capture_mode": "serial",
-        "notes": [],
-        "runs": [],
-        "results": {},
-    }
-    failures = 0
-    for tool in ["semrush", "similarweb"]:
-        data, attempts, best_meta = capture_bundle.run_capture_with_retries(
-            tool=tool,
-            query=domain,
-            username=username,
-            password=password,
-            session_prefix="dvos-workflow",
-            keep_session=False,
-            max_attempts=capture_bundle.preferred_attempts(tool),
-            max_node_rotations=max_node_rotations,
-        )
-        bundle["runs"].extend(attempts)
-        bundle["results"][tool] = {
-            "best_attempt": best_meta,
-            "data": data,
-        }
-        if not best_meta.get("quality", {}).get("core_ready"):
-            failures += 1
-
-    bundle["summary"] = {
-        "requested_tools": ["semrush", "similarweb"],
-        "completed_tools": [
-            tool
-            for tool in ["semrush", "similarweb"]
-            if bundle["results"].get(tool, {}).get("best_attempt", {}).get("status") in {"ok", "partial"}
-        ],
-        "core_ready_tools": [
-            tool
-            for tool in ["semrush", "similarweb"]
-            if bundle["results"].get(tool, {}).get("best_attempt", {}).get("quality", {}).get("core_ready")
-        ],
-        "partial_tools": [
-            tool
-            for tool in ["semrush", "similarweb"]
-            if bundle["results"].get(tool, {}).get("best_attempt", {}).get("status") == "partial"
-        ],
-        "failed_tools": [
-            tool
-            for tool in ["semrush", "similarweb"]
-            if bundle["results"].get(tool, {}).get("best_attempt", {}).get("status") == "error"
-        ],
-        "all_succeeded": failures == 0,
-    }
-    return bundle
+    return capture_api.run_capture_plan(
+        query=domain,
+        username=username,
+        password=password,
+        tools=["semrush", "similarweb"],
+        session_prefix="dvos-workflow",
+        keep_session=False,
+        max_node_rotations=max_node_rotations,
+        continue_on_error=True,
+        request_id="workflow-capture",
+    )
 
 
 def build_page_artifacts_payload(
@@ -895,6 +965,7 @@ def build_workflow(
     primary_cta_url: str = "",
     primary_cta_label: str = "",
     bundle_input: str | None = None,
+    bundle_payload: dict[str, Any] | None = None,
     trends_input: str | None = None,
 ) -> dict[str, Any]:
     page_type = query_page_type(query)
@@ -912,6 +983,7 @@ def build_workflow(
         password=password,
         max_node_rotations=max_node_rotations,
         bundle_input=bundle_input,
+        bundle_payload=bundle_payload,
     )
 
     if mode == "demand":

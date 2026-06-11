@@ -134,6 +134,84 @@ Example response envelope:
 }
 ```
 
+## Workflow Service
+
+`scripts/workflow_service.py` is the higher-level scale wrapper over:
+
+- `capture_api.py`
+- `run_demand_workflow.py`
+- `page_artifacts.py`
+
+Routes:
+
+- `GET /health`
+- `POST /workflow`
+- `POST /workflow/page-artifacts`
+
+Request body supports:
+
+- `mode`
+- `query`
+- `domain`
+- live 3ue `username` / `password`
+- `bundle_input`
+- `bundle_payload`
+- `trends_input`
+- `brand_name`
+- `brand_url`
+- `primary_cta_url`
+- `primary_cta_label`
+- `request_id`
+
+Example request:
+
+```json
+{
+  "mode": "demand",
+  "query": "ahrefs alternative",
+  "domain": "ahrefs.com",
+  "username": "3ue-user",
+  "password": "3ue-pass",
+  "brand_name": "Your Brand",
+  "brand_url": "https://example.com",
+  "primary_cta_url": "https://example.com/signup",
+  "request_id": "wf-1"
+}
+```
+
+Example response shape for `POST /workflow/page-artifacts`:
+
+```json
+{
+  "service": {
+    "name": "demand-validation-os.workflow_service",
+    "version": "2026-06-11"
+  },
+  "request_id": "wf-1",
+  "ok": true,
+  "data": {
+    "workflow_summary": {
+      "mode": "demand",
+      "query": "ahrefs alternative",
+      "decision": {
+        "band": "ship_cluster",
+        "recommended_action": "ship_cluster",
+        "total_score": 74,
+        "all_hard_gates_passed": true
+      },
+      "direct_answer": {},
+      "page_plan": {},
+      "normalized_snapshot": {}
+    },
+    "page_artifacts": {
+      "available": true,
+      "page_count": 1,
+      "pages": []
+    }
+  }
+}
+```
+
 ## Normalized Cross-Tool Schema
 
 The top-level `normalized` block is the stable shared layer for later scale / skill consumers.
@@ -278,6 +356,25 @@ Examples:
 - `tool_signals.similarweb.landing_page_count`
 - `tool_signals.similarweb.seed_keywords`
 - `tool_signals.similarweb.route_navigation_used`
+
+## Normalized To Artifact Path
+
+`page_artifacts.py` now prefers `evidence.tool_capture.normalized` when present.
+
+That means downstream scale / service code can:
+
+1. capture once through `capture_api.py` or `capture_service.py`
+2. pass the stable bundle into `run_demand_workflow.py` as `bundle_payload`
+3. let `page_artifacts.py` build proof points and comparison-page JSON from the normalized layer
+
+This reduces coupling to raw:
+
+- `results.semrush.data.top_pages`
+- `results.semrush.data.top_organic_keywords`
+- `results.similarweb.data.website_evidence.search_overview`
+- `results.similarweb.data.website_evidence.website_content`
+
+The raw payloads still remain available for deeper debugging or later extraction.
 
 If a 3ue tool page shows a daily-limit wall such as `Daily usage limit reached`, the capture scripts should:
 

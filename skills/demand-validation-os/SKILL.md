@@ -258,6 +258,10 @@ python3 scripts/capture_api.py \
 python3 scripts/capture_service.py \
   --host 127.0.0.1 \
   --port 8765
+
+python3 scripts/workflow_service.py \
+  --host 127.0.0.1 \
+  --port 8766
 ```
 
 Current behavior:
@@ -274,6 +278,13 @@ Service behavior:
 - keeps the same serial single-browser policy as the CLI
 - rejects concurrent capture requests with HTTP `409`
 
+Workflow service behavior:
+
+- exposes the higher-level `新词验证 / 榜单归因` output over local HTTP/JSON
+- returns both the final workflow decision and page-artifact JSON
+- can accept live 3ue credentials, `bundle_input`, or an in-memory `bundle_payload`
+- keeps one workflow request at a time so the capture layer stays serial
+
 Example:
 
 ```bash
@@ -285,6 +296,20 @@ curl -s http://127.0.0.1:8765/capture \
     "username": "'"$THREEUE_USERNAME"'",
     "password": "'"$THREEUE_PASSWORD"'",
     "request_id": "svc-1"
+  }'
+
+curl -s http://127.0.0.1:8766/workflow/page-artifacts \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "mode": "demand",
+    "query": "ahrefs alternative",
+    "domain": "ahrefs.com",
+    "username": "'"$THREEUE_USERNAME"'",
+    "password": "'"$THREEUE_PASSWORD"'",
+    "brand_name": "Your Brand",
+    "brand_url": "https://example.com",
+    "primary_cta_url": "https://example.com/signup",
+    "request_id": "wf-1"
   }'
 ```
 
@@ -352,6 +377,7 @@ This runner:
 - computes the scorecard
 - emits a guided `web.cafe`-style staged flow in the final JSON
 - emits `artifacts.page_artifacts` so comparison / alternative pages can move from blueprint to publishable page JSON
+- prefers the `normalized` capture layer when that layer is present, so later scale/service code can pass a stable bundle instead of raw Semrush / Similarweb payloads only
 
 If you only need the page-output layer from an existing workflow JSON:
 

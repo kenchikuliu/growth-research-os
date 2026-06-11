@@ -49,6 +49,31 @@ def brand_context_payload(
 
 
 def evidence_counts(workflow: dict[str, Any]) -> dict[str, int]:
+    normalized = get_path(workflow, "evidence", "tool_capture", "normalized", default={})
+    if normalized:
+        top_pages = normalized.get("top_pages", [])
+        top_keywords = normalized.get("top_keywords", [])
+        landing_pages = normalized.get("landing_pages", [])
+        page_clusters = normalized.get("page_clusters", [])
+        tool_signals = normalized.get("tool_signals", {})
+        return {
+            "semrush_top_pages": len([row for row in top_pages if row.get("source_tool") == "semrush"]),
+            "semrush_top_keywords": len([row for row in top_keywords if row.get("source_tool") == "semrush"]),
+            "similarweb_folder_rows": len(
+                [row for row in page_clusters if row.get("source_tool") == "similarweb" and row.get("cluster_type") == "folder"]
+            ),
+            "similarweb_non_brand_keywords": len([row for row in top_keywords if row.get("source_tool") == "similarweb"]),
+            "similarweb_paid_landing_pages": len(
+                [row for row in landing_pages if row.get("source_tool") == "similarweb" and row.get("landing_type") == "paid_landing_page"]
+            ),
+            "similarweb_priority_keyword_alerts": int(
+                get_path(tool_signals, "similarweb", "keyword_count", default=0)
+            ),
+            "similarweb_priority_landing_alerts": int(
+                get_path(tool_signals, "similarweb", "landing_page_count", default=0)
+            ),
+        }
+
     semrush_top_pages = len(get_path(workflow, "evidence", "tool_capture", "results", "semrush", "data", "top_pages", default=[]))
     semrush_top_keywords = len(
         get_path(workflow, "evidence", "tool_capture", "results", "semrush", "data", "top_organic_keywords", default=[])

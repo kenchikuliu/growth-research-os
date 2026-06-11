@@ -65,6 +65,10 @@ python3 skills/demand-validation-os/scripts/capture_service.py \
   --host 127.0.0.1 \
   --port 8765
 
+python3 skills/demand-validation-os/scripts/workflow_service.py \
+  --host 127.0.0.1 \
+  --port 8766
+
 python3 skills/demand-validation-os/scripts/google_trends.py \
   --query crazygames \
   --geo US \
@@ -90,6 +94,9 @@ Current state:
 - `capture_api.py` now also emits a top-level `normalized` layer so downstream scale / skill code can read one stable cross-tool schema instead of stitching raw Similarweb / Semrush payloads manually.
 - `capture_service.py` exposes the same capture plan over local HTTP/JSON with `GET /health`, `POST /capture`, and `POST /capture/tool`.
 - `capture_service.py` keeps the same strict execution policy as the CLI: `single_device + single_browser + single_active_page + serial`, and rejects concurrent capture requests with HTTP `409`.
+- `run_demand_workflow.py` now accepts a full prebuilt `bundle_payload`, not just a file path, so later scale or service code can hand normalized capture data directly into the scoring and artifact layers.
+- `workflow_service.py` is the higher-level scale entrypoint. It returns final `新词验证 / 榜单归因` workflow output plus page-artifact JSON in one HTTP call.
+- `page_artifacts.py` now prefers the `normalized` capture layer when counting proof, landing-page evidence, and page-cluster evidence, so page JSON generation no longer depends on raw tool-specific shapes alone.
 - `google_trends.py` now tries official Google Trends first, then can fall back to configured RapidAPI or DataForSEO providers, while keeping a normalized `30d / 90d / 12m / 5y` output shape and recording `provider_attempts`.
 - `run_demand_workflow.py` is the one-click orchestrator that combines gefei, chuhai, Google Trends, Similarweb, Semrush, scorecard logic, and a staged guided-flow layer.
 - `page_artifacts.py` plus `run_demand_workflow.py -> artifacts.page_artifacts` push the workflow one step further into publishable page JSON, especially for `alternative / comparison / versus` pages with direct-answer copy, CTA, fit-for blocks, and comparison-table structure.
@@ -107,6 +114,20 @@ curl -s http://127.0.0.1:8765/capture \
     "username": "'"$THREEUE_USERNAME"'",
     "password": "'"$THREEUE_PASSWORD"'",
     "request_id": "demo-capture-1"
+  }'
+
+curl -s http://127.0.0.1:8766/workflow/page-artifacts \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "mode": "demand",
+    "query": "ahrefs alternative",
+    "domain": "ahrefs.com",
+    "username": "'"$THREEUE_USERNAME"'",
+    "password": "'"$THREEUE_PASSWORD"'",
+    "brand_name": "Your Brand",
+    "brand_url": "https://example.com",
+    "primary_cta_url": "https://example.com/signup",
+    "request_id": "demo-workflow-1"
   }'
 ```
 
