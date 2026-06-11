@@ -34,6 +34,251 @@ Every capture JSON should include:
 }
 ```
 
+## Unified Capture API Envelope
+
+`scripts/capture_api.py` and `scripts/capture_service.py` now return one shared bundle:
+
+```json
+{
+  "api": {
+    "name": "demand-validation-os.capture_api",
+    "version": "2026-06-11"
+  },
+  "request": {
+    "id": "req-1",
+    "query": {
+      "type": "domain",
+      "value": "crazygames.com"
+    },
+    "tools": ["semrush", "similarweb"]
+  },
+  "captured_at": "2026-06-11T04:20:00Z",
+  "capture_mode": "serial",
+  "execution_policy": {
+    "device_scope": "single_device",
+    "browser_scope": "single_browser",
+    "page_scope": "single_active_page",
+    "run_mode": "serial"
+  },
+  "runs": [],
+  "results": {
+    "semrush": {
+      "best_attempt": {},
+      "data": {}
+    },
+    "similarweb": {
+      "best_attempt": {},
+      "data": {}
+    }
+  },
+  "summary": {
+    "core_ready_tools": ["semrush", "similarweb"],
+    "all_succeeded": true
+  },
+  "normalized": {}
+}
+```
+
+`normalized` is additive. Downstream scale / skill code should prefer it when they need one stable cross-tool schema, but raw tool payloads remain available under `results.<tool>.data`.
+
+## Local HTTP Service
+
+`scripts/capture_service.py` exposes the same bundle over local HTTP/JSON.
+
+Routes:
+
+- `GET /health`
+- `POST /capture`
+- `POST /capture/tool`
+
+Behavior rules:
+
+- keeps `single_device + single_browser + single_active_page + serial`
+- runs only one capture at a time
+- returns HTTP `409` with `error.code = "capture_busy"` if another request is already running
+
+Example request:
+
+```json
+{
+  "query": "crazygames.com",
+  "tools": ["semrush", "similarweb"],
+  "username": "3ue-user",
+  "password": "3ue-pass",
+  "session_prefix": "dvos-service",
+  "max_node_rotations": 2,
+  "continue_on_error": false,
+  "request_id": "svc-1"
+}
+```
+
+Example response envelope:
+
+```json
+{
+  "service": {
+    "name": "demand-validation-os.capture_service",
+    "version": "2026-06-11"
+  },
+  "served_at": "2026-06-11T04:20:05Z",
+  "request_id": "svc-1",
+  "ok": true,
+  "data": {
+    "api": {},
+    "request": {},
+    "execution_policy": {},
+    "results": {},
+    "summary": {},
+    "normalized": {}
+  }
+}
+```
+
+## Normalized Cross-Tool Schema
+
+The top-level `normalized` block is the stable shared layer for later scale / skill consumers.
+
+```json
+{
+  "normalized": {
+    "query": {
+      "type": "domain",
+      "value": "crazygames.com"
+    },
+    "tools_requested": ["semrush", "similarweb"],
+    "tools_attempted": ["semrush", "similarweb"],
+    "tools_ready": ["semrush", "similarweb"],
+    "coverage": {
+      "status": "ok",
+      "partial_tools": [],
+      "failed_tools": []
+    },
+    "traffic_summary": {
+      "monthly_visits_estimate": 315900000,
+      "organic_traffic_estimate": 93600000,
+      "paid_traffic_estimate": 576100,
+      "organic_share_percent": 42.97,
+      "paid_share_percent": 1.11,
+      "global_rank": 386,
+      "channel_mix": [],
+      "top_country_shares": []
+    },
+    "top_pages": [],
+    "top_keywords": [],
+    "landing_pages": [],
+    "page_clusters": [],
+    "competitors": [],
+    "geo_signals": [],
+    "tool_signals": {
+      "semrush": {},
+      "similarweb": {}
+    },
+    "notes": []
+  }
+}
+```
+
+### `traffic_summary`
+
+Use this for the fast cross-tool snapshot:
+
+- Similarweb contributes monthly visits, visit trend, channel mix, and top-country shares when `website_performance` is available.
+- Semrush contributes organic traffic, paid traffic, and market/database layers.
+- All numbers remain third-party estimates and should be described as estimates in final analysis.
+
+### `top_pages`
+
+Unified page-level rows. Typical fields:
+
+```json
+{
+  "url": "https://www.crazygames.com/",
+  "title": "CrazyGames",
+  "page_kind": "organic_top_page | popular_page",
+  "traffic_estimate": 3272000,
+  "traffic_share_percent": 27.82,
+  "traffic_change_percent": null,
+  "traffic_change_pp": null,
+  "top_keyword": "crazy games",
+  "position": 1,
+  "source_tool": "semrush | similarweb",
+  "source_section": "top_pages | website_content_top_pages"
+}
+```
+
+### `top_keywords`
+
+Unified keyword rows. Typical fields:
+
+```json
+{
+  "keyword": "crazy games",
+  "keyword_kind": "organic | non_brand",
+  "search_channel": "organic | mixed",
+  "position": 1,
+  "volume": 4090000,
+  "traffic_estimate": 3272000,
+  "traffic_share_percent": 27.82,
+  "organic_share_percent": null,
+  "paid_share_percent": null,
+  "url": "https://www.crazygames.com/",
+  "source_tool": "semrush | similarweb",
+  "source_section": "top_organic_keywords | keyword_research.top_non_brand_keywords"
+}
+```
+
+### `landing_pages`
+
+Current landing-page layer is Similarweb-first:
+
+```json
+{
+  "url": "https://crazygames.com/game/geometry-dash-online",
+  "landing_type": "popular_page | paid_landing_page",
+  "clicks_estimate": 18000,
+  "traffic_share_percent": 3.94,
+  "traffic_change_percent": 0.0,
+  "traffic_change_pp": null,
+  "top_keyword": "geometry dash",
+  "new_keyword_count": 12,
+  "source_tool": "similarweb",
+  "source_section": "landing_pages_research.top_pages | landing_pages_research.paid_landing_pages"
+}
+```
+
+### `page_clusters`
+
+Use this to group demand by topic or folder shape:
+
+- Semrush contributes `top_topics`
+- Similarweb contributes `landing_pages_research.folder_rows`
+
+### `competitors`
+
+Use this as the shared competitor layer:
+
+- Semrush contributes `organic_competitors`
+- Similarweb contributes `similar_sites` when available
+
+### `geo_signals`
+
+Use this to compare geography and market/database evidence:
+
+- Semrush contributes `markets_current`
+- Similarweb contributes `website_performance.top_countries`
+
+### `tool_signals`
+
+This block summarizes per-tool readiness and quick operational facts.
+
+Examples:
+
+- `tool_signals.semrush.top_page_count`
+- `tool_signals.semrush.top_keyword_count`
+- `tool_signals.similarweb.landing_page_count`
+- `tool_signals.similarweb.seed_keywords`
+- `tool_signals.similarweb.route_navigation_used`
+
 If a 3ue tool page shows a daily-limit wall such as `Daily usage limit reached`, the capture scripts should:
 
 - record the event in `raw_artifacts.usage_limit_events`

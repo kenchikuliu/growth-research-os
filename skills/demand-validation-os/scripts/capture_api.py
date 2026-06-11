@@ -13,6 +13,7 @@ from typing import Any, Sequence
 
 import capture_semrush
 import capture_similarweb
+from capture_normalize import build_normalized_capture
 from browser_capture import iso_utc_now
 
 
@@ -373,6 +374,7 @@ def run_capture_plan(
             break
 
     bundle["summary"] = build_capture_summary(bundle, normalized_tools, failures)
+    bundle["normalized"] = build_normalized_capture(bundle)
     return bundle
 
 

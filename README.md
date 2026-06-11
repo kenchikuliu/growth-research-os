@@ -61,6 +61,10 @@ python3 skills/demand-validation-os/scripts/capture_api.py \
   --max-node-rotations 2 \
   --output /tmp/crazygames-capture-api.json
 
+python3 skills/demand-validation-os/scripts/capture_service.py \
+  --host 127.0.0.1 \
+  --port 8765
+
 python3 skills/demand-validation-os/scripts/google_trends.py \
   --query crazygames \
   --geo US \
@@ -83,9 +87,28 @@ Current state:
 - `capture_bundle.py` is the preferred way to run both tools together because it executes them serially and avoids cross-session interference from parallel browser-backed runs.
 - `capture_api.py` is now the unified capture entrypoint for later scale / skill calls. Its default execution policy is `single_device + single_browser + single_active_page + serial`.
 - `capture_bundle.py` remains as a backward-compatible wrapper, but new code should call `capture_api.py` or import `capture_api.run_capture_plan()`.
+- `capture_api.py` now also emits a top-level `normalized` layer so downstream scale / skill code can read one stable cross-tool schema instead of stitching raw Similarweb / Semrush payloads manually.
+- `capture_service.py` exposes the same capture plan over local HTTP/JSON with `GET /health`, `POST /capture`, and `POST /capture/tool`.
+- `capture_service.py` keeps the same strict execution policy as the CLI: `single_device + single_browser + single_active_page + serial`, and rejects concurrent capture requests with HTTP `409`.
 - `google_trends.py` now tries official Google Trends first, then can fall back to configured RapidAPI or DataForSEO providers, while keeping a normalized `30d / 90d / 12m / 5y` output shape and recording `provider_attempts`.
 - `run_demand_workflow.py` is the one-click orchestrator that combines gefei, chuhai, Google Trends, Similarweb, Semrush, scorecard logic, and a staged guided-flow layer.
 - `page_artifacts.py` plus `run_demand_workflow.py -> artifacts.page_artifacts` push the workflow one step further into publishable page JSON, especially for `alternative / comparison / versus` pages with direct-answer copy, CTA, fit-for blocks, and comparison-table structure.
+
+HTTP example:
+
+```bash
+curl -s http://127.0.0.1:8765/health
+
+curl -s http://127.0.0.1:8765/capture \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "query": "crazygames.com",
+    "tools": ["semrush", "similarweb"],
+    "username": "'"$THREEUE_USERNAME"'",
+    "password": "'"$THREEUE_PASSWORD"'",
+    "request_id": "demo-capture-1"
+  }'
+```
 
 ```
 /demand-validation-os

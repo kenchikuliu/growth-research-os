@@ -254,6 +254,10 @@ export THREEUE_PASSWORD='...'
 python3 scripts/capture_api.py \
   --query crazygames.com \
   --output /tmp/crazygames-capture-api.json
+
+python3 scripts/capture_service.py \
+  --host 127.0.0.1 \
+  --port 8765
 ```
 
 Current behavior:
@@ -262,6 +266,27 @@ Current behavior:
 - enforces `single_device`, `single_browser`, `single_active_page`, `serial`
 - collapses non-active tabs after 3ue opens a tool page so one live browser stays on one page
 - returns both per-attempt telemetry and per-tool structured JSON under one envelope
+- adds a top-level `normalized` block with one shared cross-tool schema for traffic, pages, keywords, landing pages, clusters, competitors, geo signals, and per-tool readiness
+
+Service behavior:
+
+- exposes the same capture plan over local HTTP/JSON
+- keeps the same serial single-browser policy as the CLI
+- rejects concurrent capture requests with HTTP `409`
+
+Example:
+
+```bash
+curl -s http://127.0.0.1:8765/capture \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "query": "crazygames.com",
+    "tools": ["semrush", "similarweb"],
+    "username": "'"$THREEUE_USERNAME"'",
+    "password": "'"$THREEUE_PASSWORD"'",
+    "request_id": "svc-1"
+  }'
+```
 
 ### Serial Bundle Capture
 

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import sys
+import json
+import threading
 import unittest
 from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,6 +19,7 @@ import guided_flow
 import run_demand_workflow
 import capture_bundle
 import capture_api
+import capture_service
 import page_artifacts
 import render_report
 
@@ -421,6 +426,333 @@ class CaptureBundleQualityTests(unittest.TestCase):
         self.assertEqual(policy["tab_strategy"], "collapse_non_active_tabs_after_tool_open")
         self.assertEqual(plan["summary"]["core_ready_tools"], ["semrush", "similarweb"])
         self.assertTrue(plan["summary"]["all_succeeded"])
+
+    def test_capture_api_adds_normalized_cross_tool_schema(self) -> None:
+        original_run_capture_with_retries = capture_api.run_capture_with_retries
+        try:
+            def fake_run_capture_with_retries(**kwargs):
+                tool = kwargs["tool"]
+                if tool == "semrush":
+                    data = {
+                        "domain_overview": {
+                            "domain": "crazygames.com",
+                            "database": "us",
+                            "organic_traffic": 93600000,
+                            "paid_traffic": 576100,
+                            "global_rank": 400,
+                        },
+                        "top_pages": [
+                            {
+                                "url": "https://www.crazygames.com/",
+                                "title": "CrazyGames",
+                                "top_keyword": "crazy games",
+                                "traffic": 3272000,
+                                "traffic_percent": 27.82,
+                                "volume": 4090000,
+                                "position": 1,
+                            }
+                        ],
+                        "top_organic_keywords": [
+                            {
+                                "keyword": "crazy games",
+                                "position": 1,
+                                "position_difference": 0,
+                                "volume": 4090000,
+                                "traffic": 3272000,
+                                "traffic_percent": 27.82,
+                                "keyword_difficulty": 85,
+                                "url": "https://www.crazygames.com/",
+                            }
+                        ],
+                        "organic_competitors": [
+                            {
+                                "domain": "poki.com",
+                                "common_keywords": 68911,
+                                "competition_level": 0.54,
+                                "organic_positions": 489811,
+                                "organic_traffic": 11635769,
+                                "traffic": 11635769,
+                            }
+                        ],
+                        "top_topics": [
+                            {
+                                "topic": "Online Multiplayer Games",
+                                "keywords_count": 25026,
+                                "top_page_url": "https://www.crazygames.com/",
+                                "top_page_keyword": "crazy games",
+                            }
+                        ],
+                        "markets_current": [
+                            {
+                                "database": "us",
+                                "rank": 400,
+                                "organic_traffic": 93600000,
+                                "organic_traffic_branded": 52000000,
+                                "organic_traffic_non_branded": 41600000,
+                                "paid_traffic": 576100,
+                            }
+                        ],
+                        "backlink_overview": {"referring_domains": 32976},
+                    }
+                else:
+                    data = {
+                        "website_evidence": {
+                            "report_navigation_used": "hash_route_assign",
+                            "similar_sites": [{"domain": "poki.com", "visits": "120M"}],
+                            "website_performance": {
+                                "available": True,
+                                "total_visits": {
+                                    "date_range": "Mar 2026 - May 2026",
+                                    "geography": "全球",
+                                    "visits": "315.9M",
+                                    "change_pct": "8.56%",
+                                },
+                                "ranks": {"global_rank": "#386"},
+                                "top_countries": {
+                                    "rows": [{"country": "United States", "share": "24.5%", "change": "2.1%"}]
+                                },
+                                "traffic_channels": {
+                                    "rows": [{"channel": "直接", "share": "48.42%"}]
+                                },
+                                "organic_search": {"share_of_traffic": "42.97%"},
+                                "paid_search": {"share_of_traffic": "1.11%"},
+                            },
+                            "website_content_top_pages": {
+                                "summary": {
+                                    "rows": [
+                                        {
+                                            "rank": 1,
+                                            "url": "crazygames.com/game/geometry-dash-online",
+                                            "share": "3.94%",
+                                            "month_over_month_change": "0%",
+                                        }
+                                    ]
+                                }
+                            },
+                            "keyword_research": {
+                                "quick_search_keywords": ["crazygames"],
+                                "top_non_brand_keywords": {
+                                    "rows": [
+                                        {
+                                            "keyword": "juegos",
+                                            "clicks": "1.2M",
+                                            "share": "3.22%",
+                                            "year_over_year_change": "52.66%",
+                                            "organic_share": "98.89%",
+                                            "paid_share": "1.11%",
+                                        }
+                                    ]
+                                },
+                            },
+                            "search_overview": {
+                                "summary": {
+                                    "brand_vs_non_brand": {
+                                        "branded": "61.06%",
+                                        "non_branded": "38.94%",
+                                    }
+                                }
+                            },
+                            "landing_pages_research": {
+                                "folder_rows": [
+                                    {"rank": 1, "folder": "crazygames.com/game", "share": "41.96%", "month_over_month_change": "0.41 pp"}
+                                ],
+                                "top_pages": {
+                                    "summary": {
+                                        "rows": [
+                                            {
+                                                "rank": 1,
+                                                "url": "crazygames.com/game/geometry-dash-online",
+                                                "share": "3.94%",
+                                                "month_over_month_change": "0%",
+                                            }
+                                        ]
+                                    }
+                                },
+                                "paid_landing_pages": {
+                                    "rows": [
+                                        {
+                                            "url": "crazygames.com/game/geometry-dash-online",
+                                            "clicks": "18K",
+                                            "share": "3.94%",
+                                            "month_over_month_change": "0%",
+                                            "top_keyword": {"keyword": "geometry dash", "new_keywords": 12},
+                                        }
+                                    ]
+                                },
+                            },
+                            "home_signals": {"priority_alerts": [{"metric": "landing_pages"}, {"metric": "keywords"}]},
+                        }
+                    }
+                meta = {
+                    "tool": tool,
+                    "session": f"dvos-{tool}-a1",
+                    "status": "ok",
+                    "quality": {"core_ready": True, "score": 4, "reasons": ["core-report-ready"]},
+                }
+                return data, [meta], meta
+
+            capture_api.run_capture_with_retries = fake_run_capture_with_retries
+            plan = capture_api.run_capture_plan(
+                query="crazygames.com",
+                username="u",
+                password="p",
+                tools=["semrush", "similarweb"],
+                session_prefix="dvos-capture",
+            )
+        finally:
+            capture_api.run_capture_with_retries = original_run_capture_with_retries
+
+        normalized = plan["normalized"]
+        self.assertEqual(normalized["query"]["value"], "crazygames.com")
+        self.assertEqual(normalized["tools_ready"], ["semrush", "similarweb"])
+        self.assertEqual(normalized["coverage"]["status"], "ok")
+        self.assertEqual(normalized["traffic_summary"]["monthly_visits_estimate"], 315900000)
+        self.assertEqual(normalized["traffic_summary"]["organic_traffic_estimate"], 93600000)
+        self.assertEqual(normalized["traffic_summary"]["global_rank"], 386)
+        self.assertTrue(any(row["source_tool"] == "semrush" for row in normalized["top_pages"]))
+        self.assertTrue(any(row["source_tool"] == "similarweb" for row in normalized["top_pages"]))
+        self.assertTrue(any(row["source_tool"] == "similarweb" for row in normalized["landing_pages"]))
+        self.assertTrue(any(row["source_tool"] == "semrush" for row in normalized["top_keywords"]))
+        self.assertTrue(any(row["source_tool"] == "similarweb" for row in normalized["top_keywords"]))
+        self.assertTrue(any(row["source_tool"] == "semrush" for row in normalized["competitors"]))
+        self.assertTrue(any(row["source_tool"] == "similarweb" for row in normalized["competitors"]))
+        self.assertEqual(normalized["tool_signals"]["similarweb"]["seed_keywords"], ["crazygames"])
+        self.assertEqual(normalized["tool_signals"]["semrush"]["referring_domains"], 32976)
+
+
+class CaptureServiceTests(unittest.TestCase):
+    def test_capture_service_health_returns_single_page_policy(self) -> None:
+        server = capture_service.build_server("127.0.0.1", 0)
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with urlopen(f"http://127.0.0.1:{port}/health", timeout=5) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["status"], "healthy")
+        self.assertEqual(payload["policy"]["browser_scope"], "single_browser")
+        self.assertEqual(payload["policy"]["page_scope"], "single_active_page")
+
+    def test_capture_service_capture_returns_normalized_payload(self) -> None:
+        original_run_capture_plan = capture_service.capture_api.run_capture_plan
+        try:
+            def fake_run_capture_plan(**kwargs):
+                return {
+                    "api": {"name": "demand-validation-os.capture_api", "version": "2026-06-11"},
+                    "request": {
+                        "id": kwargs.get("request_id") or "req-1",
+                        "query": {"type": "domain", "value": kwargs["query"]},
+                        "tools": ["semrush"],
+                    },
+                    "execution_policy": capture_service.capture_api.build_execution_policy(
+                        tools=["semrush"],
+                        session_prefix=kwargs.get("session_prefix") or "svc",
+                        keep_session=False,
+                        max_node_rotations=2,
+                        continue_on_error=False,
+                    ),
+                    "results": {
+                        "semrush": {
+                            "best_attempt": {
+                                "status": "ok",
+                                "quality": {"core_ready": True, "score": 3, "reasons": ["core-report-ready"]},
+                            },
+                            "data": {
+                                "domain_overview": {"organic_traffic": 1000, "paid_traffic": 50},
+                                "top_pages": [{"url": "https://example.com", "title": "Example"}],
+                                "top_organic_keywords": [{"keyword": "example"}],
+                            },
+                        }
+                    },
+                    "summary": {
+                        "requested_tools": ["semrush"],
+                        "completed_tools": ["semrush"],
+                        "core_ready_tools": ["semrush"],
+                        "partial_tools": [],
+                        "failed_tools": [],
+                        "all_succeeded": True,
+                    },
+                    "normalized": {
+                        "query": {"type": "domain", "value": kwargs["query"]},
+                        "tools_ready": ["semrush"],
+                        "traffic_summary": {"organic_traffic_estimate": 1000},
+                    },
+                }
+
+            capture_service.capture_api.run_capture_plan = fake_run_capture_plan
+            server = capture_service.build_server("127.0.0.1", 0)
+            port = server.server_address[1]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                req = Request(
+                    f"http://127.0.0.1:{port}/capture",
+                    data=json.dumps(
+                        {
+                            "query": "crazygames.com",
+                            "tools": ["semrush"],
+                            "username": "u",
+                            "password": "p",
+                            "request_id": "svc-1",
+                        }
+                    ).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urlopen(req, timeout=5) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+        finally:
+            capture_service.capture_api.run_capture_plan = original_run_capture_plan
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["request_id"], "svc-1")
+        self.assertEqual(payload["data"]["normalized"]["tools_ready"], ["semrush"])
+        self.assertEqual(payload["data"]["execution_policy"]["page_scope"], "single_active_page")
+
+    def test_capture_service_rejects_parallel_request_when_busy(self) -> None:
+        server = capture_service.build_server("127.0.0.1", 0)
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        acquired = capture_service.SERVICE_LOCK.acquire(blocking=False)
+        self.assertTrue(acquired)
+        try:
+            req = Request(
+                f"http://127.0.0.1:{port}/capture",
+                data=json.dumps(
+                    {
+                        "query": "crazygames.com",
+                        "tools": ["semrush"],
+                        "username": "u",
+                        "password": "p",
+                        "request_id": "svc-busy",
+                    }
+                ).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with self.assertRaises(HTTPError) as ctx:
+                urlopen(req, timeout=5)
+            payload = json.loads(ctx.exception.read().decode("utf-8"))
+        finally:
+            capture_service.SERVICE_LOCK.release()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        self.assertEqual(ctx.exception.code, 409)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "capture_busy")
 
 
 class GuidedFlowTests(unittest.TestCase):
