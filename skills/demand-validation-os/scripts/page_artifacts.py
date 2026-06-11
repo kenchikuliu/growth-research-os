@@ -518,20 +518,82 @@ def build_frontend_payload(
     }
 
 
+def build_publishable_page(
+    *,
+    kind: str,
+    slug: str,
+    target_path: str,
+    page_json: dict[str, Any],
+    workflow: dict[str, Any],
+) -> dict[str, Any]:
+    frontend = build_frontend_payload(
+        kind=kind,
+        slug=slug,
+        target_path=target_path,
+        page_json=page_json,
+        workflow=workflow,
+    )
+    hero = frontend.get("hero") or {}
+    blocks = frontend.get("blocks") or []
+    sections = []
+    for block in blocks:
+        block_type = block.get("type")
+        data = block.get("data") or {}
+        sections.append(
+            {
+                "id": block.get("id"),
+                "type": block_type,
+                "required": bool(block.get("required")),
+                "heading": data.get("heading") or "",
+                "body": data,
+            }
+        )
+    return {
+        "version": "2026-06-11",
+        "slug": slug,
+        "path": target_path,
+        "template": kind,
+        "seo": frontend.get("seo") or {},
+        "hero": {
+            "eyebrow": hero.get("eyebrow"),
+            "headline": hero.get("headline"),
+            "subheadline": hero.get("subheadline"),
+            "primary_cta": hero.get("primary_cta") or {},
+            "supporting_proof": hero.get("supporting_proof") or [],
+        },
+        "sections": sections,
+        "navigation": frontend.get("navigation") or {},
+        "editorial": frontend.get("editorial") or {},
+        "source_context": frontend.get("source_context") or {},
+    }
+
+
 def build_page_artifacts(workflow: dict[str, Any], brand_context: dict[str, str] | None = None) -> dict[str, Any]:
     context = brand_context or brand_context_payload()
     first_pages = get_path(workflow, "report", "first_batch_of_pages", default=[])
     artifacts = []
+    publishable_pages = []
     for page in first_pages:
         if (page.get("page_type") or "") == "对比页":
-            artifacts.append(build_comparison_page_artifact(page, workflow, context))
+            artifact = build_comparison_page_artifact(page, workflow, context)
         else:
-            artifacts.append(build_generic_page_artifact(page, workflow, context))
+            artifact = build_generic_page_artifact(page, workflow, context)
+        artifacts.append(artifact)
+        publishable_pages.append(
+            build_publishable_page(
+                kind=artifact.get("kind") or "page_brief",
+                slug=artifact.get("slug") or "page-artifact",
+                target_path=artifact.get("target_path") or "/",
+                page_json=artifact.get("page_json") or {},
+                workflow=workflow,
+            )
+        )
     return {
         "available": bool(artifacts),
         "brand_context": context,
         "page_count": len(artifacts),
         "pages": artifacts,
+        "publishable_pages": publishable_pages,
         "frontend_protocol": {
             "version": "2026-06-11",
             "page_template_types": sorted({artifact.get("kind") for artifact in artifacts if artifact.get("kind")}),

@@ -116,12 +116,14 @@ Current state:
 - `workflow_service.py` is the higher-level scale entrypoint. It returns final `新词验证 / 榜单归因` workflow output plus page-artifact JSON in one HTTP call.
 - `workflow_scale.py` now holds the reusable thin `scale_output` projection so both CLI and HTTP callers get the same compact result shape.
 - `workflow_playbook.py` is the new high-level result layer. It compresses each workflow into a more execution-ready `playbook` for `榜单归因` and `新词验证`.
+- `workflow_playbook.py` now also emits a mode-specific `playbook_template`, so `榜单归因` and `新词验证` each carry a stable staged execution scaffold instead of only a summary.
 - `run_scale.py` is the thin local CLI for one-off or batch jobs. It returns `scale_output`, `playbook`, and `page_artifacts`, and only includes full workflow JSON when explicitly requested.
 - `run_scale.py` now supports `json / csv / tsv / xlsx` batch-job input and flattened `json / csv / tsv / xlsx` output, so leaderboard-style job lists can be run directly without pandas/openpyxl.
 - `run_scale.py` and `workflow_service.py /scale*` now both support leaderboard-style filtering and ranking with `min_score`, `allowed_actions`, `require_tools_ready`, `sort_by`, `ascending`, and `top`.
 - `page_artifacts.py` now prefers the `normalized` capture layer when counting proof, landing-page evidence, and page-cluster evidence, so page JSON generation no longer depends on raw tool-specific shapes alone.
 - `page_artifacts.py` now also emits a stable `frontend_payload` per page plus a top-level `frontend_protocol` summary, so frontend rendering no longer has to infer layout sections from free-form copy.
 - `frontend_payload` now also includes explicit `blocks` metadata with `id`, `type`, `required`, and `data`, while `frontend_protocol` publishes `block_types` so renderer code can validate layouts before rendering.
+- `page_artifacts.py` now also emits `publishable_pages`, a more directly renderable page-copy JSON layer on top of `page_json` and `frontend_payload`.
 - `google_trends.py` now tries official Google Trends first, then can fall back to configured RapidAPI or DataForSEO providers, while keeping a normalized `30d / 90d / 12m / 5y` output shape and recording `provider_attempts`.
 - `run_demand_workflow.py` is the one-click orchestrator that combines gefei, chuhai, Google Trends, Similarweb, Semrush, scorecard logic, and a staged guided-flow layer.
 - `page_artifacts.py` plus `run_demand_workflow.py -> artifacts.page_artifacts` push the workflow one step further into publishable page JSON, especially for `alternative / comparison / versus` pages with direct-answer copy, CTA, fit-for blocks, and comparison-table structure.

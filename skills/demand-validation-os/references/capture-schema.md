@@ -247,6 +247,9 @@ Example response shape for `POST /workflow/playbook`:
       "decision": {
         "recommended_action": "ship_cluster"
       },
+      "playbook_template": {
+        "template_type": "new_demand_launch_play"
+      },
       "launch_plan": {
         "first_batch_titles": [],
         "artifact_slugs": []
@@ -553,6 +556,7 @@ Typical `playbook` responsibilities:
 - compress the decision into one execution-oriented summary
 - separate the next actions from the longer workflow reasoning
 - surface first-batch page titles, artifact slugs, reusable parts, and do-not-copy constraints
+- expose a stable `playbook_template` so downstream scale / skill / UI code can render a fixed execution scaffold per mode
 
 ## Frontend Artifact Protocol
 
@@ -564,6 +568,7 @@ Each page artifact now contains both:
 Top-level artifact bundle also contains:
 
 - `frontend_protocol`
+- `publishable_pages`
 
 Example:
 
@@ -576,6 +581,20 @@ Example:
     "page_template_types": ["comparison_page"],
     "block_types": ["comparison_table", "direct_answers", "evidence", "faq", "fit_for"]
   },
+  "publishable_pages": [
+    {
+      "version": "2026-06-11",
+      "slug": "ahrefs-alternative",
+      "path": "/alternatives/ahrefs-alternative",
+      "template": "comparison_page",
+      "seo": {},
+      "hero": {},
+      "sections": [],
+      "navigation": {},
+      "editorial": {},
+      "source_context": {}
+    }
+  ],
   "pages": [
     {
       "kind": "comparison_page",
@@ -615,6 +634,7 @@ Example:
 
 Use `frontend_payload` when rendering pages in a frontend app. Use `page_json` when you still want the richer editorial shape.
 Use `frontend_payload.blocks` when you want a schema-stable render protocol instead of inferring section semantics from prose or section order.
+Use `publishable_pages` when you want a more direct “ready-to-render page copy JSON” layer for CMS, page builders, or static-site ingestion.
 
 If a 3ue tool page shows a daily-limit wall such as `Daily usage limit reached`, the capture scripts should:
 

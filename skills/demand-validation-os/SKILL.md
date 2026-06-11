@@ -291,6 +291,7 @@ Workflow service behavior:
 
 - exposes the higher-level `新词验证 / 榜单归因` output over local HTTP/JSON
 - returns the final workflow decision, `playbook`, and page-artifact JSON
+- `playbook` now also carries `playbook_template`, so callers can consume a mode-specific staged execution scaffold
 - can accept live 3ue credentials, `bundle_input`, or an in-memory `bundle_payload`
 - keeps one workflow request at a time so the capture layer stays serial
 
@@ -437,6 +438,7 @@ This runner:
 - computes the scorecard
 - emits a guided `web.cafe`-style staged flow in the final JSON
 - emits a top-level `playbook` for direct execution handoff
+- emits `playbook_template` inside `playbook` so attribution and demand validation each have a fixed execution scaffold
 - emits `artifacts.page_artifacts` so comparison / alternative pages can move from blueprint to publishable page JSON
 - prefers the `normalized` capture layer when that layer is present, so later scale/service code can pass a stable bundle instead of raw Semrush / Similarweb payloads only
 
@@ -458,6 +460,7 @@ Current artifact behavior:
 - adds top-level `frontend_protocol` so frontend code can understand available page template types without guessing
 - `frontend_payload` now also includes explicit `blocks`, each with `id`, `type`, `required`, and `data`
 - `frontend_protocol` now publishes `block_types` so a renderer can validate available block families before render time
+- adds `publishable_pages`, a more directly renderable page-copy JSON layer for frontend or CMS ingestion
 
 ## Google Trends Script
 

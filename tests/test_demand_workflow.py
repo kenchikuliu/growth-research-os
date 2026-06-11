@@ -264,6 +264,10 @@ class DemandWorkflowHeuristicsTests(unittest.TestCase):
         self.assertEqual(frontend["sections"][2]["type"], "comparison_table")
         self.assertEqual(frontend["blocks"][0]["id"], "direct-answers")
         self.assertTrue(frontend["blocks"][0]["required"])
+        publishable = artifacts["publishable_pages"][0]
+        self.assertEqual(publishable["template"], "comparison_page")
+        self.assertEqual(publishable["hero"]["primary_cta"]["url"], "https://example.com/signup")
+        self.assertEqual(publishable["sections"][2]["type"], "comparison_table")
 
     def test_demand_raw_scores_reward_complete_evidence(self) -> None:
         trends = {
@@ -1240,6 +1244,8 @@ class WorkflowPlaybookTests(unittest.TestCase):
         self.assertEqual(playbook["decision"]["recommended_action"], "ship_cluster")
         self.assertEqual(playbook["launch_plan"]["page_artifact_count"], 2)
         self.assertIn("ahrefs alternative", playbook["launch_plan"]["first_batch_titles"])
+        self.assertEqual(playbook["playbook_template"]["template_type"], "new_demand_launch_play")
+        self.assertEqual(playbook["playbook_template"]["stages"][0]["id"], "reality_check")
 
     def test_build_attribution_playbook_collects_replication_fields(self) -> None:
         workflow = {
@@ -1265,6 +1271,8 @@ class WorkflowPlaybookTests(unittest.TestCase):
         self.assertEqual(playbook["mode"], "attribution")
         self.assertEqual(playbook["replication_play"]["reusable_part"], "复用页面型。")
         self.assertEqual(playbook["decision"]["band"], "solid_attribution")
+        self.assertEqual(playbook["playbook_template"]["template_type"], "leaderboard_attribution_play")
+        self.assertEqual(playbook["playbook_template"]["stages"][0]["id"], "window_lock")
 
 
 class WorkflowServiceTests(unittest.TestCase):
