@@ -15,6 +15,7 @@ import capture_api
 import capture_bundle
 import google_trends
 import guided_flow
+import keyword_verdict
 import page_artifacts
 import scorecard as scorecard_module
 import web_cafe_kd
@@ -1090,6 +1091,7 @@ def build_workflow(
         bundle=bundle,
         guided=workflow["guided_flow"],
     )
+    workflow["keyword_verdict"] = keyword_verdict.build_keyword_verdict(workflow)
     workflow["artifacts"] = {
         "page_artifacts": build_page_artifacts_payload(
             workflow,

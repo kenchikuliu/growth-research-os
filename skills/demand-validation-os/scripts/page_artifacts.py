@@ -173,6 +173,9 @@ def build_proof_points(workflow: dict[str, Any]) -> list[str]:
             points.append(f"web.cafe KD 提示：{kd_guidance}")
         else:
             points.append(f"web.cafe KD={kd_score}，提示：{kd_guidance}")
+    verdict_summary = get_path(workflow, "keyword_verdict", "summary", default="")
+    if verdict_summary:
+        points.append(f"统一判断：{verdict_summary}")
     return points[:6]
 
 

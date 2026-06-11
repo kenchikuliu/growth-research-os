@@ -127,6 +127,7 @@ Current state:
 - `workflow_scale.py` now holds the reusable thin `scale_output` projection so both CLI and HTTP callers get the same compact result shape.
 - `workflow_playbook.py` is the new high-level result layer. It compresses each workflow into a more execution-ready `playbook` for `榜单归因` and `新词验证`.
 - `workflow_playbook.py` now also emits a mode-specific `playbook_template`, so `榜单归因` and `新词验证` each carry a stable staged execution scaffold instead of only a summary.
+- `keyword_verdict.py` is the new shared result layer that turns Similarweb + Semrush + Google Trends + web.cafe KD into one stable keyword/site verdict JSON. `workflow`, `scale_output`, and `playbook` now all expose it.
 - `run_scale.py` is the thin local CLI for one-off or batch jobs. It returns `scale_output`, `playbook`, and `page_artifacts`, and only includes full workflow JSON when explicitly requested.
 - `run_scale.py` now supports `json / csv / tsv / xlsx` batch-job input and flattened `json / csv / tsv / xlsx` output, so leaderboard-style job lists can be run directly without pandas/openpyxl.
 - `run_scale.py` and `workflow_service.py /scale*` now both support leaderboard-style filtering and ranking with `min_score`, `allowed_actions`, `require_tools_ready`, `sort_by`, `ascending`, and `top`.

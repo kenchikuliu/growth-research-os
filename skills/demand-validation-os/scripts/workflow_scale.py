@@ -27,6 +27,7 @@ def build_scale_output(workflow: dict[str, Any]) -> dict[str, Any]:
     decision = workflow.get("decision") or {}
     artifacts = (workflow.get("artifacts") or {}).get("page_artifacts") or {}
     normalized = ((workflow.get("evidence") or {}).get("tool_capture") or {}).get("normalized") or {}
+    verdict = workflow.get("keyword_verdict") or {}
     return {
         "mode": workflow.get("mode"),
         "query": (workflow.get("input") or {}).get("query"),
@@ -49,6 +50,15 @@ def build_scale_output(workflow: dict[str, Any]) -> dict[str, Any]:
             "page_artifact_count": artifacts.get("page_count", 0),
             "artifacts_available": bool(artifacts.get("available")),
         },
+        "keyword_verdict": {
+            "summary": verdict.get("summary"),
+            "primary_recommendation": verdict.get("primary_recommendation"),
+            "page_type": verdict.get("page_type"),
+            "kd_bucket": get_path(verdict, "kd", "bucket", default=""),
+            "tools_ready": verdict.get("tools_ready") or [],
+            "first_moves": verdict.get("first_moves") or [],
+            "main_uncertainty": verdict.get("main_uncertainty") or "",
+        },
         "normalized_snapshot": {
             "tools_ready": normalized.get("tools_ready") or [],
             "coverage": normalized.get("coverage") or {},
@@ -60,6 +70,18 @@ def build_scale_output(workflow: dict[str, Any]) -> dict[str, Any]:
         },
         "artifacts": artifacts,
     }
+
+
+def get_path(data: Any, *path: Any, default: Any = None) -> Any:
+    current: Any = data
+    for key in path:
+        if isinstance(current, dict):
+            current = current.get(key)
+        else:
+            return default
+        if current is None:
+            return default
+    return current
 
 
 def passes_filters(

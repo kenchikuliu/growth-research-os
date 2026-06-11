@@ -211,6 +211,7 @@ def build_demand_playbook(workflow: dict[str, Any]) -> dict[str, Any]:
     report = workflow.get("report") or {}
     decision = workflow.get("decision") or {}
     derived = workflow.get("derived") or {}
+    verdict = workflow.get("keyword_verdict") or {}
     page_artifacts = get_path(workflow, "artifacts", "page_artifacts", default={}) or {}
     first_pages = report.get("first_batch_of_pages") or []
     page_titles = [
@@ -233,6 +234,7 @@ def build_demand_playbook(workflow: dict[str, Any]) -> dict[str, Any]:
             "all_hard_gates_passed": decision.get("all_hard_gates_passed"),
         },
         "why_now": report.get("core_conclusion") or "",
+        "keyword_verdict": verdict,
         "evidence_chain": [
             report.get("demand_reality") or "",
             report.get("search_proof") or "",
@@ -267,6 +269,7 @@ def build_attribution_playbook(workflow: dict[str, Any]) -> dict[str, Any]:
     report = workflow.get("report") or {}
     decision = workflow.get("decision") or {}
     derived = workflow.get("derived") or {}
+    verdict = workflow.get("keyword_verdict") or {}
     return {
         "mode": "attribution",
         "goal": "榜单归因",
@@ -277,6 +280,7 @@ def build_attribution_playbook(workflow: dict[str, Any]) -> dict[str, Any]:
             "all_hard_gates_passed": decision.get("all_hard_gates_passed"),
         },
         "core_judgment": report.get("core_conclusion") or "",
+        "keyword_verdict": verdict,
         "growth_map": {
             "main_growth_pages": compact_text_list(report.get("main_growth_pages") or []),
             "main_growth_terms": compact_text_list([report.get("main_growth_terms") or ""]),

@@ -29,6 +29,7 @@ import tabular_io
 import render_report
 import workflow_playbook
 import web_cafe_kd
+import keyword_verdict
 
 
 class GoogleTrendsSummaryTests(unittest.TestCase):
@@ -1424,10 +1425,72 @@ class NormalizedArtifactTests(unittest.TestCase):
 
 
 class WorkflowPlaybookTests(unittest.TestCase):
+    def test_keyword_verdict_builds_demand_verdict(self) -> None:
+        workflow = {
+            "mode": "demand",
+            "input": {"query": "ahrefs alternative", "domain": "ahrefs.com"},
+            "decision": {"recommended_action": "ship_cluster", "band": "ship_cluster", "total_score": 74, "all_hard_gates_passed": True},
+            "report": {
+                "core_conclusion": "建议先做一组页面。",
+                "demand_reality": "需求真实。",
+                "search_proof": "已有搜索承接。",
+                "page_type_recommendation": "优先按对比页承接。",
+                "recommended_action": "ship_cluster",
+                "main_uncertainty": "社区证据仍可补。",
+                "first_batch_of_pages": [{"working_title": "ahrefs alternative"}],
+            },
+            "derived": {
+                "cluster_summary": "可扩为 cluster。",
+                "monetization_summary": "适合注册转化。",
+                "kd_summary": "web.cafe KD=45.3，先从对比页切入。",
+            },
+            "scores": {
+                "raw_scores": {
+                    "demand_reality": 4,
+                    "search_carry": 4,
+                    "trend_stability": 3,
+                    "serp_entry": 3,
+                    "page_intent_fit": 4,
+                    "clusterability": 4,
+                    "monetization": 4,
+                    "execution_fit": 4,
+                },
+                "reasoning": {
+                    "demand_reality": ["Semrush core capture ready"],
+                    "search_carry": ["Top keyword rows: 5"],
+                    "page_intent_fit": ["Query intent maps to 对比页"],
+                    "serp_entry": ["KD bucket: moderate"],
+                    "clusterability": ["Unique keyword samples: 8"],
+                },
+            },
+            "evidence": {
+                "web_cafe_kd": {
+                    "available": True,
+                    "kd_score": 45.3,
+                    "kd_bucket": "moderate",
+                    "guidance": "不要只看这个词本身，先找对比页切入。",
+                    "source": {"mode": "cached_fallback_after_live_failure"},
+                },
+                "tool_capture": {"normalized": {"tools_ready": ["semrush", "similarweb"]}},
+            },
+            "inferences": {"page_type": "对比页"},
+        }
+        verdict = keyword_verdict.build_keyword_verdict(workflow)
+        self.assertEqual(verdict["type"], "new_keyword_validation")
+        self.assertEqual(verdict["primary_recommendation"], "ship_cluster")
+        self.assertEqual(verdict["kd"]["bucket"], "moderate")
+        self.assertEqual(verdict["first_batch_titles"][0], "ahrefs alternative")
+        self.assertEqual(verdict["stage_verdicts"][0]["id"], "demand_reality")
+
     def test_build_demand_playbook_collects_page_plan(self) -> None:
         workflow = {
             "mode": "demand",
             "decision": {"recommended_action": "ship_cluster", "band": "ship_cluster", "total_score": 74, "all_hard_gates_passed": True},
+            "keyword_verdict": {
+                "type": "new_keyword_validation",
+                "summary": "建议先做一组页面。",
+                "primary_recommendation": "ship_cluster",
+            },
             "report": {
                 "core_conclusion": "建议先做一组页面。",
                 "demand_reality": "需求真实。",
@@ -1456,6 +1519,7 @@ class WorkflowPlaybookTests(unittest.TestCase):
         playbook = workflow_playbook.build_playbook(workflow)
         self.assertEqual(playbook["mode"], "demand")
         self.assertEqual(playbook["decision"]["recommended_action"], "ship_cluster")
+        self.assertEqual(playbook["keyword_verdict"]["primary_recommendation"], "ship_cluster")
         self.assertEqual(playbook["launch_plan"]["page_artifact_count"], 2)
         self.assertIn("ahrefs alternative", playbook["launch_plan"]["first_batch_titles"])
         self.assertEqual(playbook["playbook_template"]["template_type"], "new_demand_launch_play")
@@ -1465,6 +1529,11 @@ class WorkflowPlaybookTests(unittest.TestCase):
         workflow = {
             "mode": "attribution",
             "decision": {"recommended_action": "replicate_narrower_variant", "band": "solid_attribution", "total_score": 68, "all_hard_gates_passed": True},
+            "keyword_verdict": {
+                "type": "leaderboard_attribution",
+                "summary": "归因基本成立。",
+                "primary_recommendation": "replicate_narrower_variant",
+            },
             "report": {
                 "core_conclusion": "归因基本成立。",
                 "main_growth_pages": ["kw -> title -> url"],
@@ -1483,6 +1552,7 @@ class WorkflowPlaybookTests(unittest.TestCase):
         }
         playbook = workflow_playbook.build_playbook(workflow)
         self.assertEqual(playbook["mode"], "attribution")
+        self.assertEqual(playbook["keyword_verdict"]["primary_recommendation"], "replicate_narrower_variant")
         self.assertEqual(playbook["replication_play"]["reusable_part"], "复用页面型。")
         self.assertEqual(playbook["decision"]["band"], "solid_attribution")
         self.assertEqual(playbook["playbook_template"]["template_type"], "leaderboard_attribution_play")
@@ -1821,6 +1891,15 @@ class WorkflowScaleTests(unittest.TestCase):
                 "page_type_recommendation": "优先按对比页承接。",
                 "first_batch_of_pages": [{"working_title": "ahrefs alternative"}],
             },
+            "keyword_verdict": {
+                "summary": "建议先做对比页。",
+                "primary_recommendation": "ship_cluster",
+                "page_type": "优先按对比页承接。",
+                "kd": {"bucket": "moderate"},
+                "tools_ready": ["semrush", "similarweb"],
+                "first_moves": ["优先页面型：对比页"],
+                "main_uncertainty": "社区证据仍可补。",
+            },
             "evidence": {
                 "tool_capture": {
                     "normalized": {
@@ -1838,6 +1917,8 @@ class WorkflowScaleTests(unittest.TestCase):
         }
         scale = workflow_scale.build_scale_output(workflow)
         self.assertEqual(scale["decision"]["recommended_action"], "ship_cluster")
+        self.assertEqual(scale["keyword_verdict"]["primary_recommendation"], "ship_cluster")
+        self.assertEqual(scale["keyword_verdict"]["kd_bucket"], "moderate")
         self.assertEqual(scale["normalized_snapshot"]["top_page_count"], 2)
         self.assertTrue(scale["page_plan"]["artifacts_available"])
 
