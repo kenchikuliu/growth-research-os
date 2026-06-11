@@ -1542,6 +1542,8 @@ class NormalizedArtifactTests(unittest.TestCase):
         self.assertEqual(page_input["cta_label"], "马上注册")
         self.assertEqual(high_level["action"], "ship_cluster")
         self.assertEqual(high_level["entry_strategy"]["kd_bucket"], "moderate")
+        self.assertEqual(high_level["business_snapshot"]["use_case"], "new_keyword_validation")
+        self.assertEqual(high_level["business_template"]["template_type"], "demand_validation_business_result")
 
     def test_page_artifacts_evidence_counts_prefer_normalized_layer(self) -> None:
         workflow = {
@@ -1793,7 +1795,15 @@ class WorkflowServiceTests(unittest.TestCase):
                 },
                 "verdict_outputs": {
                     "page_artifact_input": {"template": "comparison_page", "cta_label": "马上注册"},
-                    "high_level_scale_verdict": {"action": "ship_cluster", "summary": "建议继续做。"},
+                    "high_level_scale_verdict": {
+                        "action": "ship_cluster",
+                        "summary": "建议继续做。",
+                        "business_snapshot": {
+                            "use_case": "new_keyword_validation",
+                            "operator_question": "这个词/需求值不值得做，先做什么页面？",
+                            "one_line_answer": "建议继续做。",
+                        },
+                    },
                 },
             }
             server = workflow_service.build_server("127.0.0.1", 0)
@@ -1831,6 +1841,10 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertEqual(payload["request_id"], "wf-1")
         self.assertEqual(payload["data"]["workflow_summary"]["decision"]["recommended_action"], "ship_cluster")
         self.assertEqual(payload["data"]["workflow_summary"]["verdict_outputs"]["high_level_scale_verdict"]["action"], "ship_cluster")
+        self.assertEqual(
+            payload["data"]["workflow_summary"]["verdict_outputs"]["high_level_scale_verdict"]["business_snapshot"]["use_case"],
+            "new_keyword_validation",
+        )
         self.assertTrue(payload["data"]["page_artifacts"]["available"])
         self.assertEqual(payload["data"]["workflow_summary"]["normalized_snapshot"]["top_keyword_count"], 3)
 
@@ -1860,7 +1874,15 @@ class WorkflowServiceTests(unittest.TestCase):
                 "artifacts": {"page_artifacts": {"available": False, "page_count": 0, "pages": []}},
                 "verdict_outputs": {
                     "page_artifact_input": {"template": "", "cta_label": ""},
-                    "high_level_scale_verdict": {"action": "replicate_narrower_variant", "summary": "归因基本成立。"},
+                    "high_level_scale_verdict": {
+                        "action": "replicate_narrower_variant",
+                        "summary": "归因基本成立。",
+                        "business_snapshot": {
+                            "use_case": "leaderboard_attribution",
+                            "operator_question": "这个站到底为什么涨，哪些部分值得复用？",
+                            "one_line_answer": "归因基本成立。",
+                        },
+                    },
                 },
             }
             server = workflow_service.build_server("127.0.0.1", 0)
@@ -1892,6 +1914,10 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["data"]["scale_output"]["decision"]["band"], "solid_attribution")
         self.assertEqual(payload["data"]["scale_output"]["verdict_outputs"]["high_level_scale_verdict"]["action"], "replicate_narrower_variant")
+        self.assertEqual(
+            payload["data"]["scale_output"]["verdict_outputs"]["high_level_scale_verdict"]["business_snapshot"]["use_case"],
+            "leaderboard_attribution",
+        )
         self.assertEqual(payload["data"]["scale_output"]["normalized_snapshot"]["top_keyword_count"], 2)
 
     def test_workflow_service_workflow_playbook_endpoint_returns_playbook(self) -> None:
@@ -2114,7 +2140,15 @@ class WorkflowScaleTests(unittest.TestCase):
             },
             "verdict_outputs": {
                 "page_artifact_input": {"template": "comparison_page", "cta_label": "马上注册"},
-                "high_level_scale_verdict": {"action": "ship_cluster", "summary": "建议先做对比页。"},
+                "high_level_scale_verdict": {
+                    "action": "ship_cluster",
+                    "summary": "建议先做对比页。",
+                    "business_snapshot": {
+                        "use_case": "new_keyword_validation",
+                        "operator_question": "这个词/需求值不值得做，先做什么页面？",
+                        "one_line_answer": "建议先做对比页。",
+                    },
+                },
             },
             "evidence": {
                 "tool_capture": {
@@ -2136,6 +2170,7 @@ class WorkflowScaleTests(unittest.TestCase):
         self.assertEqual(scale["keyword_verdict"]["primary_recommendation"], "ship_cluster")
         self.assertEqual(scale["keyword_verdict"]["kd_bucket"], "moderate")
         self.assertEqual(scale["verdict_outputs"]["high_level_scale_verdict"]["action"], "ship_cluster")
+        self.assertEqual(scale["verdict_outputs"]["high_level_scale_verdict"]["business_snapshot"]["use_case"], "new_keyword_validation")
         self.assertEqual(scale["normalized_snapshot"]["top_page_count"], 2)
         self.assertTrue(scale["page_plan"]["artifacts_available"])
 
@@ -2244,6 +2279,7 @@ class RunScaleCliTests(unittest.TestCase):
             output_path.unlink(missing_ok=True)
         self.assertIn("recommended_action", written)
         self.assertIn("ship_cluster", written)
+        self.assertIn("business_use_case", written)
 
     def test_run_scale_leaderboard_filters_sort_and_top(self) -> None:
         results = [

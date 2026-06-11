@@ -113,7 +113,7 @@ Current state:
 - `Semrush` now retries the overview route once if the first pass returns no RPC payloads.
 - `Semrush` and `Similarweb` now auto-detect 3ue daily-limit pages and can rotate to another configured node before retrying.
 - `Similarweb` now survives more 3ue shell half-load cases and can still emit activation-home priority-alert signals even when deeper routes are fragile.
-- `Similarweb` still has partial gaps for the deepest landing-pages style report automation, but it now emits structured `keyword_research` and `landing_pages_research` layers on top of `网站表现` / website-performance, `网站内容`, `搜索概况`, quick-search seeds, route candidates, and priority alerts.
+- `Similarweb` still has partial gaps for the deepest landing-pages style report automation, but it now emits structured `keyword_research` and `landing_pages_research` layers on top of `网站表现` / website-performance, `网站内容`, `搜索概况`, quick-search seeds, route candidates, and priority alerts, plus `readiness / row_counts / evidence_summary` fields so later scale logic can tell “only seeds” from “deeper rows reached”.
 - `capture_bundle.py` is the preferred way to run both tools together because it executes them serially and avoids cross-session interference from parallel browser-backed runs.
 - `capture_api.py` is now the unified capture entrypoint for later scale / skill calls. Its default execution policy is `single_device + single_browser + single_active_page + serial`.
 - `capture_bundle.py` remains as a backward-compatible wrapper, but new code should call `capture_api.py` or import `capture_api.run_capture_plan()`.
@@ -128,7 +128,7 @@ Current state:
 - `workflow_playbook.py` is the new high-level result layer. It compresses each workflow into a more execution-ready `playbook` for `榜单归因` and `新词验证`.
 - `workflow_playbook.py` now also emits a mode-specific `playbook_template`, so `榜单归因` and `新词验证` each carry a stable staged execution scaffold instead of only a summary.
 - `keyword_verdict.py` is the new shared result layer that turns Similarweb + Semrush + Google Trends + web.cafe KD into one stable keyword/site verdict JSON. `workflow`, `scale_output`, and `playbook` now all expose it.
-- `workflow_verdict.py` is the next-layer packager over `keyword_verdict` and `page_artifacts`. It now emits `page_artifact_input` for verdict-driven page generation and `high_level_scale_verdict` for scale / batch consumption.
+- `workflow_verdict.py` is the next-layer packager over `keyword_verdict` and `page_artifacts`. It now emits `page_artifact_input` for verdict-driven page generation and `high_level_scale_verdict` for scale / batch consumption, including a `business_snapshot` and `business_template` block so `榜单归因 / 新词验证` can feed batch boards and reviewer-facing outputs directly.
 - `run_scale.py` is the thin local CLI for one-off or batch jobs. It returns `scale_output`, `playbook`, and `page_artifacts`, and only includes full workflow JSON when explicitly requested.
 - `run_scale.py` now supports `json / csv / tsv / xlsx` batch-job input and flattened `json / csv / tsv / xlsx` output, so leaderboard-style job lists can be run directly without pandas/openpyxl.
 - `run_scale.py` and `workflow_service.py /scale*` now both support leaderboard-style filtering and ranking with `min_score`, `allowed_actions`, `require_tools_ready`, `sort_by`, `ascending`, and `top`.

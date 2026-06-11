@@ -1122,15 +1122,41 @@ def build_keyword_research(
     priority_alerts = [row for row in home_signals.get("priority_alerts", []) if row.get("metric") == "keywords"]
     seed_keywords = (modal_state.get("keywords") or [])[:10]
     route_candidates = build_search_route_candidates(report_links)
+    top_non_brand_rows = get_path(search_overview, "top_non_brand_keywords", "rows", default=[])
+    organic_rows = get_path(organic_search_overview, "top_non_brand_keywords", "rows", default=[])
+    paid_rows = get_path(paid_search_overview, "top_non_brand_keywords", default={}) or {}
+    paid_landing_rows = get_path(paid_search_overview, "paid_landing_pages", "rows", default=[])
+    readiness = "missing"
+    if top_non_brand_rows or organic_rows or paid_landing_rows:
+        readiness = "deep_rows_ready"
+    elif seed_keywords or autocomplete_keywords or priority_alerts or route_candidates:
+        readiness = "route_or_seed_ready"
     return {
         "available": bool(
             quick_search.get("ok")
             or seed_keywords
             or autocomplete_keywords
-            or get_path(search_overview, "top_non_brand_keywords", "rows", default=[])
+            or top_non_brand_rows
             or priority_alerts
         ),
         "seed_domain": query,
+        "readiness": readiness,
+        "row_counts": {
+            "quick_search_keywords": len(seed_keywords),
+            "autocomplete_keywords": len(autocomplete_keywords or []),
+            "top_non_brand_keywords": len(top_non_brand_rows),
+            "organic_top_non_brand_keywords": len(organic_rows),
+            "paid_landing_pages": len(paid_landing_rows),
+            "priority_keyword_alerts": len(priority_alerts),
+            "route_candidates": len(route_candidates),
+        },
+        "evidence_summary": {
+            "has_quick_search": bool(quick_search.get("ok")),
+            "has_top_non_brand_rows": bool(top_non_brand_rows),
+            "has_organic_keyword_rows": bool(organic_rows),
+            "has_paid_landing_rows": bool(paid_landing_rows),
+            "has_priority_alerts": bool(priority_alerts),
+        },
         "quick_search_keywords": seed_keywords,
         "autocomplete_keywords": autocomplete_keywords or [],
         "top_non_brand_keywords": search_overview.get("top_non_brand_keywords") or {},
@@ -1154,8 +1180,27 @@ def build_landing_pages_research(
     folder_rows = get_path(website_content, "summary", "rows", default=[])
     top_page_rows = get_path(website_content_top_pages, "summary", "rows", default=[])
     paid_landing_rows = get_path(search_overview, "paid_landing_pages", "rows", default=[])
+    readiness = "missing"
+    if folder_rows or top_page_rows or paid_landing_rows:
+        readiness = "deep_rows_ready"
+    elif priority_alerts or route_candidates:
+        readiness = "route_or_alert_ready"
     return {
         "available": bool(folder_rows or top_page_rows or paid_landing_rows or priority_alerts or route_candidates),
+        "readiness": readiness,
+        "row_counts": {
+            "folder_rows": len(folder_rows),
+            "top_pages": len(top_page_rows),
+            "paid_landing_pages": len(paid_landing_rows),
+            "priority_landing_page_alerts": len(priority_alerts),
+            "route_candidates": len(route_candidates),
+        },
+        "evidence_summary": {
+            "has_folder_rows": bool(folder_rows),
+            "has_top_page_rows": bool(top_page_rows),
+            "has_paid_landing_rows": bool(paid_landing_rows),
+            "has_priority_alerts": bool(priority_alerts),
+        },
         "folder_rows": folder_rows,
         "top_pages": website_content_top_pages,
         "paid_landing_pages": search_overview.get("paid_landing_pages") or {},

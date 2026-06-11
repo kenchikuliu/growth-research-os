@@ -219,9 +219,15 @@ class SimilarwebCollectRotationTests(unittest.TestCase):
         )
 
         self.assertTrue(keyword_research["available"])
+        self.assertEqual(keyword_research["readiness"], "deep_rows_ready")
+        self.assertEqual(keyword_research["row_counts"]["top_non_brand_keywords"], 1)
+        self.assertTrue(keyword_research["evidence_summary"]["has_top_non_brand_rows"])
         self.assertEqual(keyword_research["quick_search_keywords"][0], "crazygames")
         self.assertTrue(keyword_research["route_candidates"])
         self.assertTrue(landing_research["available"])
+        self.assertEqual(landing_research["readiness"], "deep_rows_ready")
+        self.assertEqual(landing_research["row_counts"]["folder_rows"], 1)
+        self.assertTrue(landing_research["evidence_summary"]["has_top_page_rows"])
         self.assertEqual(landing_research["folder_rows"][0]["folder"], "/game")
         self.assertTrue(landing_research["route_candidates"])
 

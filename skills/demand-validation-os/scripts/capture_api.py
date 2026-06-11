@@ -71,6 +71,8 @@ def assess_capture_quality(tool: str, data: dict[str, Any] | None) -> dict[str, 
         folder_rows = len((((website_content or {}).get("summary") or {}).get("rows") or []))
         paid_landing_rows = len((((search_overview or {}).get("paid_landing_pages") or {}).get("rows") or []))
         non_brand_keyword_rows = len((((search_overview or {}).get("top_non_brand_keywords") or {}).get("rows") or []))
+        landing_readiness = landing_pages_research.get("readiness")
+        keyword_readiness = keyword_research.get("readiness")
         if website_perf.get("available") and (folder_rows > 0 or paid_landing_rows > 0 or non_brand_keyword_rows > 0):
             reasons = ["website-performance-ready"]
             if folder_rows > 0:
@@ -80,9 +82,9 @@ def assess_capture_quality(tool: str, data: dict[str, Any] | None) -> dict[str, 
             if non_brand_keyword_rows > 0:
                 reasons.append("non-brand-keywords-ready")
             if landing_pages_research.get("available"):
-                reasons.append("landing-pages-research-ready")
+                reasons.append(f"landing-pages-research:{landing_readiness or 'available'}")
             if keyword_research.get("available"):
-                reasons.append("keyword-research-ready")
+                reasons.append(f"keyword-research:{keyword_readiness or 'available'}")
             return {
                 "status": "ok",
                 "core_ready": True,
@@ -90,11 +92,16 @@ def assess_capture_quality(tool: str, data: dict[str, Any] | None) -> dict[str, 
                 "reasons": reasons,
             }
         if website_perf.get("available"):
+            reasons = ["website-performance-ready"]
+            if landing_pages_research.get("available"):
+                reasons.append(f"landing-pages-research:{landing_readiness or 'available'}")
+            if keyword_research.get("available"):
+                reasons.append(f"keyword-research:{keyword_readiness or 'available'}")
             return {
                 "status": "ok",
                 "core_ready": True,
                 "score": 3,
-                "reasons": ["website-performance-ready"],
+                "reasons": reasons,
             }
         if home_signals.get("priority_alerts") or quick_search.get("ok"):
             reasons = []

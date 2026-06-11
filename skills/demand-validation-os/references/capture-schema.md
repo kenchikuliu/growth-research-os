@@ -81,6 +81,23 @@ Every capture JSON should include:
 
 `normalized` is additive. Downstream scale / skill code should prefer it when they need one stable cross-tool schema, but raw tool payloads remain available under `results.<tool>.data`.
 
+For Similarweb deeper capture layers:
+
+- `website_evidence.keyword_research`
+- `website_evidence.landing_pages_research`
+
+the JSON now also includes:
+
+- `readiness`: `missing | route_or_seed_ready | route_or_alert_ready | deep_rows_ready`
+- `row_counts`: stable counts for seeds, route candidates, alerts, and extracted rows
+- `evidence_summary`: booleans for whether deeper keyword / landing-page evidence was actually reached
+
+Use these fields when you need to distinguish:
+
+- shell only
+- seeds / route hints only
+- true page-level rows ready
+
 ## Local HTTP Service
 
 `scripts/capture_service.py` exposes the same bundle over local HTTP/JSON.

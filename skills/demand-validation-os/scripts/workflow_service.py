@@ -133,6 +133,8 @@ def flatten_scale_result(*, index: int | None, mode: str | None, query: str | No
     page_plan = scale_output.get("page_plan") or {}
     keyword_verdict = scale_output.get("keyword_verdict") or {}
     verdict_outputs = scale_output.get("verdict_outputs") or {}
+    high_level = (verdict_outputs.get("high_level_scale_verdict") or {}) if isinstance(verdict_outputs, dict) else {}
+    business_snapshot = high_level.get("business_snapshot") or {}
     normalized_snapshot = scale_output.get("normalized_snapshot") or {}
     page_artifacts = result.get("page_artifacts") or {}
     first_pages = page_plan.get("first_batch_of_pages") or []
@@ -152,6 +154,9 @@ def flatten_scale_result(*, index: int | None, mode: str | None, query: str | No
         "verdict_action": keyword_verdict.get("primary_recommendation") or "",
         "verdict_kd_bucket": keyword_verdict.get("kd_bucket") or "",
         "verdict_page_type": keyword_verdict.get("page_type") or "",
+        "business_use_case": business_snapshot.get("use_case") or "",
+        "business_question": business_snapshot.get("operator_question") or "",
+        "business_one_line_answer": business_snapshot.get("one_line_answer") or "",
         "tools_ready": ",".join(normalized_snapshot.get("tools_ready") or []),
         "top_page_count": normalized_snapshot.get("top_page_count") or 0,
         "top_keyword_count": normalized_snapshot.get("top_keyword_count") or 0,
